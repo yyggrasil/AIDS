@@ -1,0 +1,137 @@
+project:
+  name: "AIDS-Alternative-Traffic-Detection"
+  description: "Algoritmo de Machine Learning para Detecção de Tráfego de Rede Maligno e Benigno usando Stacking Ensemble (LinearSVC + Random Forest)"
+  version: "1.0.0"
+  domain: "Cybersecurity / Intrusion Detection System (AIDS)"
+
+environment:
+  python:
+    version: ">=3.10, <3.12"
+  virtual_environment:
+    mandatory: true
+    tool: "venv"
+    directory: ".venv"
+    activation:
+      windows: ".venv\\Scripts\\activate"
+      linux_mac: "source .venv/bin/activate"
+    description: "Obrigatório a criação e ativação de um ambiente virtual Python (.venv) para isolar todas as dependências do projeto."
+
+core_libraries:
+  data_manipulation:
+    - name: "pandas"
+      version: "^2.1.0"
+      purpose: "Carregamento, manipulação e estruturação dos dados de tráfego de rede."
+    - name: "numpy"
+      version: "^1.26.0"
+      purpose: "Operações vetoriais, matriciais e suporte numérico de alta performance."
+
+machine_learning:
+  framework: "scikit-learn"
+  version: "^1.3.0"
+  components:
+    base_learners:
+      - name: "Linear Support Vector Classifier (LinearSVC)"
+        module: "sklearn.svm.LinearSVC"
+        hyperparameters:
+          C: 1.0
+          loss: "squared_hinge"
+          dual: false
+          max_iter: 2000
+          random_state: 42
+        purpose: "Classificador SVM linear de altíssima velocidade O(N), ideal para dados de grande escala."
+      
+      - name: "Random Forest Classifier"
+        module: "sklearn.ensemble.RandomForestClassifier"
+        hyperparameters:
+          n_estimators: 100
+          max_depth: 20
+          min_samples_split: 5
+          min_samples_leaf: 2
+          n_jobs: -1
+          random_state: 42
+        purpose: "Ensemble de árvores de decisão com bagging, oferecendo alta imunidade a overfitting e robustez a ruídos."
+
+    meta_learner:
+      name: "Logistic Regression"
+      module: "sklearn.linear_model.LogisticRegression"
+      hyperparameters:
+        C: 1.0
+        solver: "lbfgs"
+        max_iter: 1000
+        random_state: 42
+      purpose: "Combinação ponderada das decisões dos modelos de Nível 0."
+
+    stacking_ensemble:
+      module: "sklearn.ensemble.StackingClassifier"
+      cross_validation: "StratifiedKFold(n_splits=5)"
+      passthrough: false
+
+feature_engineering_and_preprocessing:
+  scaling:
+    - name: "StandardScaler"
+      module: "sklearn.preprocessing.StandardScaler"
+      purpose: "Padronização Z-score para atributos numéricos (essencial para o LinearSVC)."
+    - name: "RobustScaler"
+      module: "sklearn.preprocessing.RobustScaler"
+      purpose: "Tratamento de dados de rede com altos níveis de ruído/outliers."
+  
+  encoding:
+    - name: "OneHotEncoder"
+      module: "sklearn.preprocessing.OneHotEncoder"
+      purpose: "Codificação de atributos categóricos como protocolos de rede (TCP, UDP, ICMP)."
+  
+  imbalance_handling:
+    - name: "SMOTE"
+      package: "imbalanced-learn"
+      version: "^0.11.0"
+      module: "imblearn.over_sampling.SMOTE"
+      purpose: "Balanceamento sintético de amostras da classe minoria (ataques raros)."
+
+model_persistence:
+  library: "joblib"
+  version: "^1.3.0"
+  target_directory: "./models"
+  format: ".joblib"
+  saved_artifacts:
+    - name: "stacking_pipeline"
+      path: "./models/stacking_pipeline.joblib"
+      description: "Pipeline completo contendo o escalonador e os modelos empilhados (Nível 0 + Nível 1)."
+    - name: "scaler"
+      path: "./models/scaler.joblib"
+      description: "Objeto StandardScaler / RobustScaler ajustado nos dados de treino."
+    - name: "meta_learner"
+      path: "./models/meta_learner.joblib"
+      description: "Meta-classificador de Regressão Logística treinado."
+  purpose: "Obrigatório o salvamento e carregamento dos algoritmos e pré-processadores na pasta ./models utilizando a biblioteca joblib."
+
+visualization_and_metrics:
+  plotting_libraries:
+    - name: "matplotlib"
+      version: "^3.8.0"
+      modules:
+        - "matplotlib.pyplot"
+      purpose: "Geração de gráficos comparativos (barras agrupadas de métricas, curvas ROC unificadas e scatter de latência)."
+    - name: "seaborn"
+      version: "^0.13.0"
+      modules:
+        - "seaborn.heatmap"
+      purpose: "Renderização de matrizes de confusão em subplots comparativos 1x3."
+
+  metrics_and_evaluation:
+    framework: "scikit-learn"
+    module: "sklearn.metrics"
+    metrics_list:
+      - name: "accuracy_score"
+        purpose: "Acurácia global do modelo."
+      - name: "precision_score"
+        purpose: "Precisão de detecção para redução de Falsos Positivos."
+      - name: "recall_score"
+        purpose: "Sensibilidade para identificação de tráfego maligno sem omissões."
+      - name: "f1_score"
+        purpose: "Média harmônica entre Precisão e Recall."
+      - name: "roc_curve / roc_auc_score"
+        purpose: "Cálculo e geração da curva ROC comparativa entre os modelos isolados e Stacking."
+      - name: "confusion_matrix"
+        purpose: "Geração das matrizes de contagem de VPs, FPs, VNs e FNs."
+      - name: "classification_report"
+        purpose: "Relatório detalhado por classe (Benigno vs Maligno)."
