@@ -79,9 +79,12 @@ def evaluate_models(models_dict, X_test, y_test, results_dir='./results', suffix
 def plot_metrics_bar(metrics_data, save_path):
     metrics_list = ['Accuracy', 'Precision', 'Recall', 'F1-Score']
     models = list(metrics_data.keys())
+    n_models = len(models)
     
     x = np.arange(len(metrics_list))
-    width = 0.25
+    # Para garantir espaço entre os grupos (ex: Accuracy e Precision),
+    # limitamos a largura total de todas as barras do grupo a 0.8, deixando 0.2 de margem.
+    width = 0.8 / n_models if n_models > 0 else 0.2
     multiplier = 0
     
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -90,14 +93,22 @@ def plot_metrics_bar(metrics_data, save_path):
         measurement = [metrics_data[model][m] for m in metrics_list]
         offset = width * multiplier
         rects = ax.bar(x + offset, measurement, width, label=model)
-        ax.bar_label(rects, padding=3, fmt='%.3f')
+        # Rotacionar os números em 90 graus e reduzir um pouco a fonte para caber em barras finas
+        ax.bar_label(rects, padding=3, fmt='%.3f', rotation=45, fontsize=9)
         multiplier += 1
 
     ax.set_ylabel('Scores')
     ax.set_title('Comparativo de Métricas entre Modelos')
-    ax.set_xticks(x + width, metrics_list)
-    ax.legend(loc='lower right')
-    ax.set_ylim(0, 1.1)
+    
+    # Centralizar o label exatamente no meio do bloco de barras
+    ax.set_xticks(x + width * (n_models - 1) / 2)
+    ax.set_xticklabels(metrics_list)
+    
+    # Mover a legenda para fora para não sobrepor as barras muito altas
+    ax.legend(loc='upper left', bbox_to_anchor=(1, 1))
+    
+    # Aumentar o limite superior para não cortar os rótulos rotacionados
+    ax.set_ylim(0, 1.2)
     
     plt.tight_layout()
     plt.savefig(save_path)
@@ -105,17 +116,17 @@ def plot_metrics_bar(metrics_data, save_path):
 
 def plot_confusion_matrices(y_true, predictions, classes, save_path):
     models = list(predictions.keys())
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    n_models = len(models)
     
-    if len(models) < 3:
-        # Fallback if somehow not exactly 3 models
-        fig, axes = plt.subplots(1, len(models), figsize=(6*len(models), 5))
-        if len(models) == 1:
-            axes = [axes]
+    fig, axes = plt.subplots(1, n_models, figsize=(6 * n_models, 5))
+    
+    # Se houver apenas 1 modelo, axes não é um array, então colocamos numa lista
+    if n_models == 1:
+        axes = [axes]
     
     for i, model in enumerate(models):
-        cm = confusion_matrix(y_true, predictions[model])
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=axes[i], normalize='true', 
+        cm = confusion_matrix(y_true, predictions[model], normalize='true')
+        sns.heatmap(cm, annot=True, fmt='.2f', cmap='Blues', ax=axes[i], 
                     xticklabels=classes, yticklabels=classes)
         axes[i].set_title(f'Matriz de Confusão: {model}')
         axes[i].set_xlabel('Predito')
@@ -126,9 +137,12 @@ def plot_confusion_matrices(y_true, predictions, classes, save_path):
     plt.close()
 
 def plot_roc_curves(y_true, probabilities, save_path):
-    plt.figure(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(10, 8))
     
-    for model, proba in probabilities.items():
+    linestyles = ['-', '--', '-.', ':']
+    colors = plt.cm.tab10.colors
+    
+    for idx, (model, proba) in enumerate(probabilities.items()):
         if proba is None:
             continue
             
@@ -144,66 +158,97 @@ def plot_roc_curves(y_true, probabilities, save_path):
         fpr, tpr, _ = roc_curve(y_true, y_score)
         roc_auc = auc(fpr, tpr)
         
-        plt.plot(fpr, tpr, lw=2, label=f'{model} (AUC = {roc_auc:.3f})')
+        style = linestyles[idx % len(linestyles)]
+        color = colors[idx % len(colors)]
         
-    plt.plot([0, 1], [0, 1], color='gray', lw=2, linestyle='--')
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.05])
-    plt.xlabel('Taxa de Falsos Positivos (FPR)')
-    plt.ylabel('Taxa de Verdadeiros Positivos (TPR)')
-    plt.title('Curva ROC Comparativa')
-    plt.legend(loc="lower right")
+        # Plot principal
+        ax.plot(fpr, tpr, color=color, linestyle=style, lw=2.5, alpha=0.9, 
+                label=f'{model} (AUC = {roc_auc:.4f})')
+        
+    ax.plot([0, 1], [0, 1], color='gray', lw=2, linestyle='--')
+    ax.set_xlim([0.0, 1.0])
+    ax.set_ylim([0.0, 1.05])
+    ax.set_xlabel('Taxa de Falsos Positivos (FPR)')
+    ax.set_ylabel('Taxa de Verdadeiros Positivos (TPR)')
+    ax.set_title('Curva ROC Comparativa')
+    ax.legend(loc="lower right")
+    
+    # Criar um "zoom" no canto superior esquerdo (onde os modelos geralmente se sobrepõem)
+    axins = ax.inset_axes([0.3, 0.4, 0.4, 0.4]) # [x0, y0, width, height]
+    for idx, (model, proba) in enumerate(probabilities.items()):
+        if proba is None: continue
+        if len(proba.shape) == 1: y_score = proba
+        elif proba.shape[1] == 2: y_score = proba[:, 1]
+        else: y_score = proba
+        fpr, tpr, _ = roc_curve(y_true, y_score)
+        style = linestyles[idx % len(linestyles)]
+        color = colors[idx % len(colors)]
+        axins.plot(fpr, tpr, color=color, linestyle=style, lw=2.5, alpha=0.9)
+    
+    # Limites do zoom
+    x1, x2, y1, y2 = -0.01, 0.1, 0.9, 1.01
+    axins.set_xlim(x1, x2)
+    axins.set_ylim(y1, y2)
+    axins.set_xticklabels([])
+    axins.set_yticklabels([])
+    ax.indicate_inset_zoom(axins, edgecolor="black")
     
     plt.tight_layout()
     plt.savefig(save_path)
     plt.close()
 
 def plot_roc_curves_multiclass(y_true, probabilities, classes, save_path):
-    plt.figure(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
+    linestyles = ['-', '--', '-.', ':']
+    colors = plt.cm.tab10.colors
     
     y_bin = label_binarize(y_true, classes=classes)
     n_classes = y_bin.shape[1]
     
-    for model, proba in probabilities.items():
-        if proba is None:
+    # Pre-calcula os dados do plot
+    macro_data = {}
+    for idx, (model, proba) in enumerate(probabilities.items()):
+        if proba is None or len(proba.shape) == 1:
             continue
-        
-        # Macro ROC
+            
         fpr = dict()
         tpr = dict()
-        roc_auc = dict()
-        
-        # If it's a decision function of shape (n_samples, n_classes)
-        if len(proba.shape) == 1:
-             continue # Shouldn't happen for multiclass
-             
         for i in range(n_classes):
             fpr[i], tpr[i], _ = roc_curve(y_bin[:, i], proba[:, i])
-        
-        # First aggregate all false positive rates
+            
         all_fpr = np.unique(np.concatenate([fpr[i] for i in range(n_classes)]))
-
-        # Then interpolate all ROC curves at this points
         mean_tpr = np.zeros_like(all_fpr)
         for i in range(n_classes):
             mean_tpr += np.interp(all_fpr, fpr[i], tpr[i])
-
-        # Finally average it and compute AUC
         mean_tpr /= n_classes
-
-        fpr_macro = all_fpr
-        tpr_macro = mean_tpr
-        roc_auc_macro = auc(fpr_macro, tpr_macro)
         
-        plt.plot(fpr_macro, tpr_macro, lw=2, label=f'{model} (Macro AUC = {roc_auc_macro:.3f})')
+        roc_auc_macro = auc(all_fpr, mean_tpr)
+        macro_data[model] = (all_fpr, mean_tpr, roc_auc_macro, linestyles[idx % len(linestyles)], colors[idx % len(colors)])
+    
+    for model, (fpr_macro, tpr_macro, roc_auc_macro, style, color) in macro_data.items():
+        ax.plot(fpr_macro, tpr_macro, color=color, linestyle=style, lw=2.5, alpha=0.9, 
+                label=f'{model} (Macro AUC = {roc_auc_macro:.4f})')
 
-    plt.plot([0, 1], [0, 1], color='gray', lw=2, linestyle='--')
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.05])
-    plt.xlabel('Taxa de Falsos Positivos (FPR)')
-    plt.ylabel('Taxa de Verdadeiros Positivos (TPR)')
-    plt.title('Curva ROC Comparativa (Macro-Average Multiclasse)')
-    plt.legend(loc="lower right")
+    ax.plot([0, 1], [0, 1], color='gray', lw=2, linestyle='--')
+    ax.set_xlim([0.0, 1.0])
+    ax.set_ylim([0.0, 1.05])
+    ax.set_xlabel('Taxa de Falsos Positivos (FPR)')
+    ax.set_ylabel('Taxa de Verdadeiros Positivos (TPR)')
+    ax.set_title('Curva ROC Comparativa (Macro-Average Multiclasse)')
+    ax.legend(loc="lower right")
+    
+    # Criar um "zoom" no canto superior esquerdo
+    axins = ax.inset_axes([0.3, 0.4, 0.4, 0.4]) 
+    for model, (fpr_macro, tpr_macro, roc_auc_macro, style, color) in macro_data.items():
+        axins.plot(fpr_macro, tpr_macro, color=color, linestyle=style, lw=2.5, alpha=0.9)
+    
+    x1, x2, y1, y2 = -0.01, 0.1, 0.9, 1.01
+    axins.set_xlim(x1, x2)
+    axins.set_ylim(y1, y2)
+    axins.set_xticklabels([])
+    axins.set_yticklabels([])
+    ax.indicate_inset_zoom(axins, edgecolor="black")
     
     plt.tight_layout()
     plt.savefig(save_path)

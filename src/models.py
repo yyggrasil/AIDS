@@ -2,6 +2,7 @@ from sklearn.svm import LinearSVC
 from sklearn.ensemble import RandomForestClassifier, StackingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold
+from sklearn.tree import DecisionTreeClassifier
 
 def get_base_learners(random_state=42):
     """
@@ -21,6 +22,14 @@ def get_base_learners(random_state=42):
             min_samples_split=5,
             min_samples_leaf=2,
             n_jobs=-1,
+            class_weight='balanced',
+            random_state=random_state
+        )),
+        ('dt', DecisionTreeClassifier(
+            max_depth=20,
+            min_samples_split=5,
+            min_samples_leaf=2,
+            class_weight='balanced',
             random_state=random_state
         ))
     ]
@@ -34,6 +43,7 @@ def get_meta_learner(random_state=42):
         C=1.0,
         solver="lbfgs",
         max_iter=1000,
+        class_weight='balanced',
         random_state=random_state
     )
 
@@ -46,7 +56,7 @@ def get_stacking_classifier(random_state=42):
     cv_strategy = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
     
     stacking_clf = StackingClassifier(
-        estimators=estimators,
+        estimators=estimators[:2],
         final_estimator=meta_learner,
         cv=cv_strategy,
         passthrough=False,

@@ -1,5 +1,6 @@
 import os
 import joblib
+from dotenv import load_dotenv
 from sklearn.model_selection import train_test_split
 from src.data_loader import load_data, prepare_target
 from src.preprocessing import drop_irrelevant_features, get_preprocessor, apply_smote
@@ -8,19 +9,25 @@ from src.evaluation import evaluate_models
 from sklearn.pipeline import Pipeline
 import numpy as np
 
+# Carrega variáveis do .env
+load_dotenv()
+
 def run_pipeline(target_mode='binary', sample_frac=0.1):
     print(f"\n{'='*50}")
     print(f"INICIANDO PIPELINE - MODO: {target_mode.upper()} (Amostra: {sample_frac*100}%)")
     print(f"{'='*50}\n")
     
+    # Flags do .env
+    train_linearsvc = os.getenv('TRAIN_LINEARSVC', 'True').strip().lower() == 'true'
+    train_dt = os.getenv('TRAIN_DT', 'True').strip().lower() == 'true'
+    train_rf = os.getenv('TRAIN_RF', 'True').strip().lower() == 'true'
+    train_stacking = os.getenv('TRAIN_STACKING', 'True').strip().lower() == 'true'
+        
     # 1. Carregar e Preparar Dados
     df = load_data('data/CICFlowMeter_out.csv', sample_frac=sample_frac)
     df = drop_irrelevant_features(df)
     X, y = prepare_target(df, mode=target_mode)
     
-    # Separando numéricos e categóricos baseados nos dtypes
-    # Geralmente, Protocol é numérico mas representa categoria. 
-    # Aqui vamos tentar inferir ou usar tipos
     categorical_features = []
     if 'Protocol' in X.columns:
         categorical_features.append('Protocol')
@@ -31,58 +38,110 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
     print("\nDividindo conjunto de treino e teste...")
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     
-    # 3. Pré-processamento e SMOTE
-    print("\nAplicando Transformações (Scaler, OneHot)...")
-    preprocessor = get_preprocessor(numeric_features, categorical_features, scale_type='standard')
+    # Determina se há algum treinamento a ser feito
+    any_training = train_linearsvc or train_dt or train_rf or train_stacking
     
-    X_train_prep = preprocessor.fit_transform(X_train)
-    X_test_prep = preprocessor.transform(X_test)
-    
-    print("\nBalanceando os dados de treino com SMOTE...")
-    X_train_res, y_train_res = apply_smote(X_train_prep, y_train, random_state=42)
-    
-    # 4. Treinamento dos Modelos Isolados para Comparação
-    print("\nTreinando Modelos Isolados...")
+    # 3. Pré-processamento
+    if any_training:
+        print("\nAplicando Transformações (Scaler, OneHot, VarianceThreshold)...")
+        preprocessor = get_preprocessor(numeric_features, categorical_features, scale_type='robust')
+        X_train_prep = preprocessor.fit_transform(X_train)
+        X_test_prep = preprocessor.transform(X_test)
+        
+        # Salva o scaler recém-treinado
+        os.makedirs('models', exist_ok=True)
+        joblib.dump(preprocessor, f'models/scaler_{target_mode}.joblib')
+    else:
+        print("\nCarregando Pré-processador existente (nenhum treinamento habilitado)...")
+        preprocessor_path = f'models/scaler_{target_mode}.joblib'
+        if os.path.exists(preprocessor_path):
+            preprocessor = joblib.load(preprocessor_path)
+            X_test_prep = preprocessor.transform(X_test)
+        else:
+            print(f"Erro: {preprocessor_path} não encontrado. Treine pelo menos um modelo primeiro.")
+            return
+
+    # 4. Treinamento ou Carregamento dos Modelos Isolados
+    print(f"\nObtendo Modelos Isolados (utilizando class_weight='balanced')...")
     estimators = dict(get_base_learners(random_state=42))
     models_dict = {}
     
-    for name, model in estimators.items():
-        print(f"Treinando {name}...")
-        model.fit(X_train_res, y_train_res)
-        models_dict[name] = model
+    if train_linearsvc and 'linearsvc' in estimators:
+        print("Treinando LinearSVC...")
+        m = estimators['linearsvc']
+        m.fit(X_train_prep, y_train)
+        models_dict['LinearSVC'] = m
+    else:
+        path = f'models/LinearSVC_{target_mode}.joblib'
+        if os.path.exists(path):
+            print("Carregando LinearSVC existente...")
+            models_dict['LinearSVC'] = joblib.load(path)
+            
+    if train_dt and 'dt' in estimators:
+        print("Treinando Decision Tree...")
+        m = estimators['dt']
+        m.fit(X_train_prep, y_train)
+        models_dict['DT'] = m
+    else:
+        path = f'models/DT_{target_mode}.joblib'
+        if os.path.exists(path):
+            print("Carregando Decision Tree existente...")
+            models_dict['DT'] = joblib.load(path)
+            
+    if train_rf and 'rf' in estimators:
+        print("Treinando RandomForest...")
+        m = estimators['rf']
+        m.fit(X_train_prep, y_train)
+        models_dict['RF'] = m
+    else:
+        path = f'models/RF_{target_mode}.joblib'
+        if os.path.exists(path):
+            print("Carregando RandomForest existente...")
+            models_dict['RF'] = joblib.load(path)
+            
+    # 5. Treinamento ou Carregamento do Stacking Ensemble
+    if train_stacking:
+        print("\nTreinando Stacking Ensemble (isso pode demorar devido ao CV)...")
+        stacking_clf = get_stacking_classifier(random_state=42)
+        stacking_clf.fit(X_train_prep, y_train)
+        models_dict['Stacking'] = stacking_clf
+    else:
+        path = f'models/Stacking_{target_mode}.joblib'
+        if os.path.exists(path):
+            print("\nCarregando Stacking Ensemble existente...")
+            models_dict['Stacking'] = joblib.load(path)
+    
+    # 6. Salvar Modelos (Apenas os que foram treinados, mas para simplificar salvamos os presentes no models_dict)
+    if any_training:
+        print("\nSalvando novos artefatos...")
         
-    # 5. Treinamento do Stacking Ensemble
-    print("\nTreinando Stacking Ensemble (isso pode demorar devido ao CV)...")
-    stacking_clf = get_stacking_classifier(random_state=42)
-    stacking_clf.fit(X_train_res, y_train_res)
-    models_dict['Stacking'] = stacking_clf
-    
-    # 6. Salvar Modelos (Persistência)
-    print("\nSalvando artefatos...")
-    os.makedirs('models', exist_ok=True)
-    
-    # O pipeline completo com Stacking
-    stacking_pipeline = Pipeline(steps=[
-        ('preprocessor', preprocessor),
-        ('classifier', stacking_clf)
-    ])
-    joblib.dump(stacking_pipeline, f'models/stacking_pipeline_{target_mode}.joblib')
-    joblib.dump(preprocessor, f'models/scaler_{target_mode}.joblib')
-    joblib.dump(stacking_clf.final_estimator_, f'models/meta_learner_{target_mode}.joblib')
-    print("Modelos salvos em ./models/")
+        if 'Stacking' in models_dict and train_stacking:
+            stacking_pipeline = Pipeline(steps=[
+                ('preprocessor', preprocessor),
+                ('classifier', models_dict['Stacking'])
+            ])
+            joblib.dump(stacking_pipeline, f'models/stacking_pipeline_{target_mode}.joblib')
+            joblib.dump(models_dict['Stacking'].final_estimator_, f'models/meta_learner_{target_mode}.joblib')
+        
+        for m_name, m_obj in models_dict.items():
+            joblib.dump(m_obj, f'models/{m_name}_{target_mode}.joblib')
+            
+        print("Modelos atualizados salvos em ./models/")
     
     # 7. Avaliação e Gráficos
-    print("\nAvaliando modelos no conjunto de Teste e gerando gráficos...")
-    evaluate_models(models_dict, X_test_prep, y_test, results_dir='./results', suffix=target_mode)
+    if models_dict:
+        print("\nAvaliando modelos no conjunto de Teste e gerando gráficos...")
+        evaluate_models(models_dict, X_test_prep, y_test, results_dir='./results', suffix=target_mode)
     
     print("\nPipeline Finalizado com Sucesso!")
 
 if __name__ == "__main__":
-    # 10% sample for initial verification as agreed
-    # Treina o pipeline binário
-    run_pipeline(target_mode='binary', sample_frac=0.1)
+    sample_frac = float(os.getenv('SAMPLE_FRAC', '0.1'))
+    run_binary = os.getenv('RUN_BINARY', 'True').strip().lower() == 'true'
+    run_multiclass = os.getenv('RUN_MULTICLASS', 'True').strip().lower() == 'true'
     
-    # Treina o pipeline multiclasse
-    # Algumas classes raras podem quebrar o StratifiedKFold e SMOTE,
-    # então o pipeline possui fallbacks (try/except) ou lida com isso adaptando.
-    #run_pipeline(target_mode='multiclass', sample_frac=0.1)
+    if run_binary:
+        run_pipeline(target_mode='binary', sample_frac=sample_frac)
+        
+    if run_multiclass:
+        run_pipeline(target_mode='multiclass', sample_frac=sample_frac)
