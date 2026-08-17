@@ -33,6 +33,7 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
         categorical_features.append('Protocol')
         X['Protocol'] = X['Protocol'].astype(str)
     numeric_features = [c for c in X.columns if c not in categorical_features]
+    X[numeric_features] = X[numeric_features].astype(np.float32)
     
     # 2. Split Treino/Teste
     print("\nDividindo conjunto de treino e teste...")
@@ -51,6 +52,7 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
         # Salva o scaler recém-treinado
         os.makedirs('models', exist_ok=True)
         joblib.dump(preprocessor, f'models/scaler_{target_mode}.joblib')
+        print(f"Pré-processador salvo em models/scaler_{target_mode}.joblib")
     else:
         print("\nCarregando Pré-processador existente (nenhum treinamento habilitado)...")
         preprocessor_path = f'models/scaler_{target_mode}.joblib'
@@ -65,12 +67,16 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
     print(f"\nObtendo Modelos Isolados (utilizando class_weight='balanced')...")
     estimators = dict(get_base_learners(random_state=42))
     models_dict = {}
+    os.makedirs('models', exist_ok=True)
     
     if train_linearsvc and 'linearsvc' in estimators:
         print("Treinando LinearSVC...")
         m = estimators['linearsvc']
         m.fit(X_train_prep, y_train)
         models_dict['LinearSVC'] = m
+        path = f'models/LinearSVC_{target_mode}.joblib'
+        joblib.dump(m, path)
+        print(f"LinearSVC treinado e salvo com sucesso em {path}")
     else:
         path = f'models/LinearSVC_{target_mode}.joblib'
         if os.path.exists(path):
@@ -82,6 +88,9 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
         m = estimators['dt']
         m.fit(X_train_prep, y_train)
         models_dict['DT'] = m
+        path = f'models/DT_{target_mode}.joblib'
+        joblib.dump(m, path)
+        print(f"Decision Tree treinada e salva com sucesso em {path}")
     else:
         path = f'models/DT_{target_mode}.joblib'
         if os.path.exists(path):
@@ -93,6 +102,9 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
         m = estimators['rf']
         m.fit(X_train_prep, y_train)
         models_dict['RF'] = m
+        path = f'models/RF_{target_mode}.joblib'
+        joblib.dump(m, path)
+        print(f"RandomForest treinado e salvo com sucesso em {path}")
     else:
         path = f'models/RF_{target_mode}.joblib'
         if os.path.exists(path):
@@ -105,30 +117,24 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
         stacking_clf = get_stacking_classifier(random_state=42)
         stacking_clf.fit(X_train_prep, y_train)
         models_dict['Stacking'] = stacking_clf
+        
+        path = f'models/Stacking_{target_mode}.joblib'
+        joblib.dump(stacking_clf, path)
+        
+        stacking_pipeline = Pipeline(steps=[
+            ('preprocessor', preprocessor),
+            ('classifier', stacking_clf)
+        ])
+        joblib.dump(stacking_pipeline, f'models/stacking_pipeline_{target_mode}.joblib')
+        joblib.dump(stacking_clf.final_estimator_, f'models/meta_learner_{target_mode}.joblib')
+        print(f"Stacking Ensemble e artefatos treinados e salvos com sucesso em ./models/")
     else:
         path = f'models/Stacking_{target_mode}.joblib'
         if os.path.exists(path):
             print("\nCarregando Stacking Ensemble existente...")
             models_dict['Stacking'] = joblib.load(path)
     
-    # 6. Salvar Modelos (Apenas os que foram treinados, mas para simplificar salvamos os presentes no models_dict)
-    if any_training:
-        print("\nSalvando novos artefatos...")
-        
-        if 'Stacking' in models_dict and train_stacking:
-            stacking_pipeline = Pipeline(steps=[
-                ('preprocessor', preprocessor),
-                ('classifier', models_dict['Stacking'])
-            ])
-            joblib.dump(stacking_pipeline, f'models/stacking_pipeline_{target_mode}.joblib')
-            joblib.dump(models_dict['Stacking'].final_estimator_, f'models/meta_learner_{target_mode}.joblib')
-        
-        for m_name, m_obj in models_dict.items():
-            joblib.dump(m_obj, f'models/{m_name}_{target_mode}.joblib')
-            
-        print("Modelos atualizados salvos em ./models/")
-    
-    # 7. Avaliação e Gráficos
+    # 6. Avaliação e Gráficos
     if models_dict:
         print("\nAvaliando modelos no conjunto de Teste e gerando gráficos...")
         evaluate_models(models_dict, X_test_prep, y_test, results_dir='./results', suffix=target_mode)

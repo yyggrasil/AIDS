@@ -4,11 +4,13 @@
 
 Este projeto consiste em um Sistema de Detecção de Intrusão Baseado em Anomalias e Assinaturas (**AIDS - Anomaly-based Intrusion Detection System**), cujo objetivo principal é classificar pacotes e fluxos de tráfego de rede entre **Maligno** (ataques como DoS/DDoS, Port Scan, Botnet, Brute Force, etc.) e **Benigno** (tráfego legítimo de rede).
 
-Para obter alta precisão, excelente poder de generalização e alta performance em datasets de grande escala, a solução emprega um algoritmo de **Stacking Ensemble (Aprendizado em Camadas)**, combinando as capacidades complementares do **LinearSVC** e do **Random Forest**.
+O projeto suporta tanto a **Classificação Binária** (Maligno vs. Benigno) quanto a **Classificação Multiclasse** (identificação dos tipos específicos de ataque).
+
+Para obter alta precisão, excelente poder de generalização e alta performance em datasets de grande escala (ex: `data/CICFlowMeter_out.csv`), a solução emprega um algoritmo de **Stacking Ensemble (Aprendizado em Camadas)**, combinando as capacidades complementares do **LinearSVC (Calibrado)**, **Random Forest** e **Extra Trees**, utilizando a **Regressão Logística** como meta-classificador.
 
 ---
 
-## 2. Requisitos de Ambiente de Execução
+## 2. Requisitos de Ambiente de Execução e Configuração
 
 ### 2.1. Ambiente Virtual Obrigatório (Python venv)
 
@@ -24,6 +26,18 @@ Para obter alta precisão, excelente poder de generalização e alta performance
   - **Windows (PowerShell):** `.\.venv\Scripts\activate`
   - **Linux / macOS:** `source .venv/bin/activate`
 
+### 2.2. Configuração Dinâmica via Arquivo `.env`
+
+O comportamento da pipeline de treinamento e avaliação é controlado dinamicamente via variáveis de ambiente carregadas do arquivo `.env`:
+
+- `TRAIN_LINEARSVC` (bool): Habilita o treinamento do modelo LinearSVC.
+- `TRAIN_DT` (bool): Habilita o treinamento do modelo Decision Tree.
+- `TRAIN_RF` (bool): Habilita o treinamento do modelo Random Forest.
+- `TRAIN_STACKING` (bool): Habilita o treinamento do Stacking Ensemble.
+- `RUN_BINARY` (bool): Executa o pipeline no modo de classificação binária.
+- `RUN_MULTICLASS` (bool): Executa o pipeline no modo de classificação multiclasse.
+- `SAMPLE_FRAC` (float): Fração de amostragem estratificada do dataset (ex: `0.01` para 1%, `0.1` para 10%).
+
 ---
 
 ## 3. Arquitetura da Solução de Machine Learning
@@ -32,35 +46,42 @@ Para obter alta precisão, excelente poder de generalização e alta performance
 
 O Stacking combina múltiplos modelos de classificação (Base Learners - Nível 0) através de um meta-classificador (Meta Learner - Nível 1).
 
-- **Nível 0 (Base Learners):**
-  - **LinearSVC (Support Vector Machine Linear):** Otimizado com complexidade linear $\mathcal{O}(N)$, ideal para grandes volumes de dados de rede. Encontra o hiperplano de margem máxima de forma extremamente rápida, identificando padrões lineares complexos entre os atributos normalizados.
-  - **Random Forest Classifier (Florestas Aleatórias):** Ensemble baseado em múltiplas Árvores de Decisão com amostragem *bootstrap* e seleção aleatória de atributos. Elimina o risco de *overfitting* de uma árvore única, oferecendo alta robustez a ruídos e capturando interações categóricas e condicionais complexas de rede.
+- **Nível 0 (Base Learners / Modelos Suportados):**
+  - **LinearSVC Calibrado (`CalibratedClassifierCV(LinearSVC)`):** Otimizado com complexidade linear $\mathcal{O}(N)$, tolerância `tol=1e-3` para rápida convergência, encapsulado com validação cruzada de 3 folds para calibração de probabilidades de classe, permitindo a geração de vetores de probabilidade para o Stacking.
+  - **Random Forest Classifier:** Ensemble de Árvores de Decisão otimizado (`n_estimators=70`, `max_depth=15`), amostragem *bootstrap*, amostragem aleatória de atributos e `class_weight='balanced'`.
+  - **Extra Trees Classifier:** Ensemble de árvores extremamente aleatorizadas otimizado (`n_estimators=70`, `max_depth=15`) com `class_weight='balanced'`.
+  - **Decision Tree Classifier:** Árvore de decisão individual (`max_depth=15`) com `class_weight='balanced'`, utilizada como modelo baseline comparativo.
 - **Nível 1 (Meta-Learner):**
-  - **Regressão Logística / Meta-Classificador:** Combina as margens/probabilidades calculadas pelo LinearSVC e pelo Random Forest para tomar a decisão final ponderada sobre a classe do tráfego.
+  - **Regressão Logística (`LogisticRegression`):** Configurada com `class_weight='balanced'`, `C=1.0` e `solver='lbfgs'`. Combina de forma ponderada as probabilidades/decisões calculadas pelos estimadores de Nível 0 (`linearsvcCalibrated`, `rf`, `et`).
 
 ```mermaid
 flowchart TD
-    A[Dados de Tráfego de Rede BRUTO] --> B[Pré-processamento & Engenharia de Features]
-    B --> C[Normalização & Seleção de Atributos]
-    
+    A[Dados de Tráfego de Rede - CICFlowMeter_out.csv] --> B[Remoção de Inf/NaN & Duplicados]
+    B --> C[Amostragem Estratificada por SAMPLE_FRAC]
+    C --> D[Remoção de Colunas Identificadoras & Constantes & Conversão float32]
+    D --> E[ColumnTransformer: Imputer + VarianceThreshold + RobustScaler / OneHotEncoder float32]
+
     subgraph Nível 0 - Base Learners
-        C --> D[Modelo LinearSVC - Support Vector Machine Linear]
-        C --> E[Modelo Random Forest - Floresta Aleatória]
+        E --> F[LinearSVC Calibrado - CalibratedClassifierCV]
+        E --> G[Random Forest Classifier]
+        E --> H[Extra Trees Classifier]
     end
 
-    D --> F[Predições / Margens LinearSVC]
-    E --> G[Predições / Probabilidades Random Forest]
+    F --> I[Probabilidades LinearSVC]
+    G --> J[Probabilidades Random Forest]
+    H --> K[Probabilidades Extra Trees]
 
     subgraph Nível 1 - Meta Learner
-        F --> H[Meta-Classificador - Regressão Logística]
-        G --> H
+        I --> L[Meta-Classificador - Regressão Logística Balanced]
+        J --> L
+        K --> L
     end
 
-    H --> I{Classificação Final}
-    I -->|Class 0| J[Tráfego Benigno]
-    I -->|Class 1| K[Tráfego Maligno]
+    L --> M{Classificação Final}
+    M -->|Binary Mode| N[Benigno vs Maligno]
+    M -->|Multiclass Mode| O[Classes Específicas de Ataque]
 
-    H --> L[Salvamento via Joblib] --> M[Diretório ./models/]
+    L --> P[Salvamento via Joblib] --> Q[Diretório ./models/]
 ```
 
 ---
@@ -69,79 +90,79 @@ flowchart TD
 
 ### 4.1. Estágios do Pipeline
 
-1. **Ingestão de Dados de Rede:**
-   - Leitura de datasets padrão de cibersegurança (arquivo para treinamento dentro da pasta `data`).
-   - Extração de métricas de fluxo (Flow Duration, Total Fwd Packets, Flow Bytes/s, Packet Length Mean, TCP Flags, etc.).
+1. **Ingestão e Amostragem de Dados de Rede:**
+   - Carregamento do dataset `data/CICFlowMeter_out.csv`.
+   - Limpeza de espaços em branco nos nomes de colunas, substituição de valores infinitos (`inf`, `-inf`) por `NaN`, e eliminação de registros com valores nulos e duplicados.
+   - Aplicação de amostragem estratificada controlada pela variável `SAMPLE_FRAC` do `.env` (com fallback automático para amostragem aleatória em caso de classes com amostragem insuficiente).
 
-2. **Limpeza e Pré-processamento:**
-   - Remoção de valores nulos, infinitos e duplicados.
-   - Codificação de atributos categóricos (One-Hot Encoding).
-   - Tratamento de *outliers*.
+2. **Limpeza e Seleção de Atributos:**
+   - Remoção de colunas identificadoras de rede: `Flow ID`, `Src IP`, `Dst IP`, `Timestamp`.
+   - Remoção de colunas com variância zero/constantes identificadas: `Bwd Packet Length Min`, `Fwd PSH Flags`, `Bwd PSH Flags`, `Fwd URG Flags`, `Bwd URG Flags`, `URG Flag Count`, `CWR Flag Count`, `ECE Flag Count`, `Fwd Bytes/Bulk Avg`, `Fwd Packet/Bulk Avg`, `Fwd Bulk Rate Avg`.
+   - Conversão de atributos numéricos para `float32` reduzindo o consumo de memória e duplicando a velocidade de computação.
 
-3. **Escalonamento e Engenharia de Features:**
-   - Aplicação de `StandardScaler` (fundamental para o bom desempenho do LinearSVC).
-   - Seleção de atributos irrelevantes ou redundantes via **Mutual Information** ou **Chi-Square**.
+3. **Escalonamento e Pré-processamento (`ColumnTransformer`):**
+   - Atributos numéricos: `SimpleImputer(strategy='median')` -> `VarianceThreshold(threshold=0.0)` -> `RobustScaler()` (ou `StandardScaler()`).
+   - Atributos categóricos (`Protocol`): `SimpleImputer(strategy='constant', fill_value='missing')` -> `OneHotEncoder(handle_unknown='ignore', dtype=np.float32)`.
 
 4. **Tratamento de Desbalanceamento:**
-   - Ajuste de `class_weight='balanced'` para garantir a detecção de ataques raros com alta sensibilidade.
+   - Uso de `class_weight='balanced'` nos estimadores base e meta-learner.
+   - Suporte ao algoritmo **SMOTE** com ajuste dinâmico de `k_neighbors` para sobreamostragem da classe minoria quando habilitado.
 
 5. **Validação Cruzada & Out-of-Fold Predictions:**
-   - Utilização de **Stratified K-Fold Cross-Validation** (ex: K=5) durante o treinamento do Stacking para gerar as meta-features do Nível 1 sem vazamento de dados (*data leakage*).
+   - Utilização de `StratifiedKFold(n_splits=3, shuffle=True, random_state=42)` no `StackingClassifier` para geração de meta-features sem vazamento de dados (*data leakage*) acelerada em 40%, com execução paralelizada (`n_jobs=-1`).
 
-6. **Persistência de Modelos Treinados (`joblib` na pasta `./models`):**
-   - Após o término do treinamento, o pipeline completo e os artefatos de modelo devem ser serializados e salvos no diretório `./models/` via **`joblib`**:
-     - `models/stacking_pipeline.joblib`: Pipeline final unificado (Pré-processador + Stacking Classifier).
-     - `models/scaler.joblib`: Objeto de normalização de dados.
-     - `models/meta_learner.joblib`: Meta-modelo treinado.
+6. **Persistência Estruturada de Modelos Treinados (`joblib` na pasta `./models/`):**
+   - Salvamento dos artefatos serializados com sufixo do modo de alvo (`_binary` ou `_multiclass`):
+     - `models/stacking_pipeline_{mode}.joblib`: Pipeline final unificado (Pré-processador + Stacking Classifier).
+     - `models/scaler_{mode}.joblib`: Objeto pré-processador/escalonador ajustado.
+     - `models/meta_learner_{mode}.joblib`: Meta-modelo de Regressão Logística treinado.
+     - `models/LinearSVC_{mode}.joblib`: Modelo LinearSVC treinado.
+     - `models/DT_{mode}.joblib`: Modelo Decision Tree treinado.
+     - `models/RF_{mode}.joblib`: Modelo Random Forest treinado.
+     - `models/Stacking_{mode}.joblib`: Stacking Classifier treinado.
 
 ---
 
 ## 5. Comparação e Avaliação Visual de Eficácia (Matplotlib & Seaborn)
 
-Para comprovar cientificamente a eficácia do **Stacking Ensemble**, o pipeline de avaliação deve treinar e testar três variações no mesmo conjunto de teste (*Hold-out Test Set*):
+O script de avaliação (`src/evaluation.py`) avalia os modelos treinados/carregados no conjunto de teste (*Hold-out Test Set*) e constrói relatórios visuais salvos no diretório `./results/`:
 
-1. **Modelo A:** LinearSVC (Isolado)
-2. **Modelo B:** Random Forest Classifier (Isolado)
-3. **Modelo C:** Stacking Classifier (Ensemble)
+### 5.1. Visualizações Geradas via Matplotlib & Seaborn
 
-### 5.1. Visualizações Obrigatórias via Matplotlib
+1. **Gráfico de Barras Agrupadas - Comparativo de Métricas (`metrics_comparison_{mode}.png`):**
+   - Exibe lado a lado: *Acurácia*, *Precisão*, *Recall* e *F1-Score* (com média macro em multiclasse).
+   - Rótulos numéricos formatados e rotacionados em 45° sobre as barras, com legenda posicionada externamente para evitar sobreposição.
 
-O script de validação deve gerar e salvar quatro gráficos comparativos em imagem (`.png`) para análise de desempenho:
+2. **Grid de Matrizes de Confusão (`confusion_matrices_{mode}.png`):**
+   - Renderização em subplots com `seaborn.heatmap` normalizados (0 a 1), exibindo taxas de acerto e erro por classe para cada modelo avaliado.
 
-1. **Gráfico de Barras Agrupadas - Comparativo de Métricas:**
-   - Exibe lado a lado: *Acurácia*, *Precisão*, *Recall* e *F1-Score* dos 3 modelos.
-   - Permite verificar visualmente o ganho percentual obtido pelo Stacking em relação aos modelos base isolados.
+3. **Curva ROC e AUC Comparativa (`roc_curves_{mode}.png` / `roc_curves_macro_{mode}.png`):**
+   - Em modo binário: Plot simultâneo das curvas ROC dos modelos com cálculo de AUC e painel de zoom (*inset plot*) no canto superior esquerdo ($FPR \in [0, 0.1]$, $TPR \in [0.9, 1.0]$).
+   - Em modo multiclasse: Plot da curva ROC com média macro (*Macro-Average ROC*) binarizada via `label_binarize` e painel de zoom embutido.
 
-2. **Curva ROC e AUC Comparativa (Receiver Operating Characteristic):**
-   - Plot simultâneo das curvas ROC dos três algoritmos no mesmo plano cartesiano Matplotlib (`plt.plot`).
-   - Compara a Taxa de Verdadeiros Positivos (TPR) vs. Taxa de Falsos Positivos (FPR) em diferentes limiares de decisão, com o valor numérico de AUC na legenda.
-
-3. **Grid de Matrizes de Confusão (1x3 Subplots):**
-   - Utiliza `seaborn.heatmap` em um grid de subplots `plt.subplots(1, 3)` para exibir as matrizes de confusão do LinearSVC, Random Forest e Stacking.
-   - Evidencia a redução de **Falsos Negativos** (ataques não detectados) e **Falsos Positivos** (alarmes falsos no tráfego legítimo).
-
-4. **Trade-off de Latência de Inferência vs. F1-Score:**
-   - Scatter plot mostrando a latência média de predição (em milissegundos por 1.000 amostras) em relação ao F1-Score final.
-   - Demonstra a relação custo-benefício computacional do Stacking frente à sua alta eficácia.
+4. **Trade-off de Latência de Inferência vs. F1-Score (`latency_vs_f1_{mode}.png`):**
+   - Scatter plot comparando a latência média de inferência (medida em milissegundos por 1.000 amostras) com o F1-Score obtido.
 
 ```mermaid
 flowchart LR
     subgraph Modelos Avaliados
-        M1[LinearSVC Isolado]
-        M2[Random Forest Isolado]
-        M3[Stacking Ensemble]
+        M1[LinearSVC / Calibrated]
+        M2[Decision Tree]
+        M3[Random Forest]
+        M4[Stacking Ensemble]
     end
 
-    M1 --> Ev[Script de Avaliação de Desempenho]
+    M1 --> Ev[src/evaluation.py - evaluate_models]
     M2 --> Ev
     M3 --> Ev
+    M4 --> Ev
 
-    Ev --> Matplotlib[Gerador de Gráficos Matplotlib]
+    Ev --> Matplotlib[Gerador de Gráficos Matplotlib & Seaborn]
 
-    Matplotlib --> G1[Bar Plot Métricas]
-    Matplotlib --> G2[Curva ROC Comparativa]
-    Matplotlib --> G3[Matrix Confusão Grid 1x3]
-    Matplotlib --> G4[Latência vs F1-Score]
+    Matplotlib --> G1[metrics_comparison_*.png]
+    Matplotlib --> G2[confusion_matrices_*.png]
+    Matplotlib --> G3[roc_curves_*.png / roc_curves_macro_*.png]
+    Matplotlib --> G4[latency_vs_f1_*.png]
 ```
 
 ---
@@ -149,9 +170,9 @@ flowchart LR
 ## 6. Requisitos Não-Funcionais
 
 - **Ambiente Isolado:** Uso exclusivo do `.venv` para gerenciamento de pacotes.
-- **Persistência Estruturada:** Armazenamento garantido dos modelos em formato `.joblib` dentro da pasta `./models/`.
-- **Validação Visual de Eficácia:** Geração automática dos relatórios gráficos comparativos em Matplotlib para validação do Stacking.
-- **Baixa Latência:** Inferência extremamente rápida (menos de **5 milissegundos** por fluxo) devido ao uso do `LinearSVC` e `Random Forest`.
-- **Escalabilidade:** Capacidade de treinar em datasets com milhões de linhas em tempo viável.
+- **Configurabilidade:** Controle total das etapas do pipeline via variáveis no `.env`.
+- **Persistência Estruturada:** Armazenamento garantido dos modelos em formato `.joblib` com identificação do modo (`_binary` / `_multiclass`) dentro de `./models/`.
+- **Validação Visual Automática:** Geração de gráficos comparativos em `./results/` após a avaliação dos modelos.
+- **Baixa Latência:** Inferência rápida otimizada para monitoramento em tempo real.
 - **Reprodutibilidade:** Fixação de sementes randômicas (`random_state=42`) em todo o pipeline.
-- **Modularidade:** Pipeline construído com `sklearn.pipeline.Pipeline` e `sklearn.ensemble.StackingClassifier`.
+- **Modularidade:** Pipeline estruturado de forma modular em `src/` (`data_loader.py`, `preprocessing.py`, `models.py`, `evaluation.py`) com orquestração centralizada em `main.py`.

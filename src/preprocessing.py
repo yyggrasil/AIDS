@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, RobustScaler, OneHotEncoder
 from sklearn.impute import SimpleImputer
@@ -8,7 +9,7 @@ from sklearn.pipeline import Pipeline
 
 def get_preprocessor(numeric_features, categorical_features, scale_type='standard'):
     """
-    Constrói o pré-processador do scikit-learn.
+    Constrói o pré-processador do scikit-learn otimizado para float32.
     scale_type: 'standard' ou 'robust'
     """
     
@@ -25,7 +26,7 @@ def get_preprocessor(numeric_features, categorical_features, scale_type='standar
 
     categorical_transformer = Pipeline(steps=[
         ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
-        ('onehot', OneHotEncoder(handle_unknown='ignore'))
+        ('onehot', OneHotEncoder(handle_unknown='ignore', dtype=np.float32))
     ])
 
     preprocessor = ColumnTransformer(

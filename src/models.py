@@ -7,36 +7,40 @@ from sklearn.calibration import CalibratedClassifierCV
 
 def get_base_learners(random_state=42):
     """
-    Retorna os modelos de base (Nível 0) configurados conforme as especificações.
+    Retorna os modelos de base (Nível 0) configurados com hiperparâmetros otimizados para alta velocidade e acurácia.
     """
     estimators = [
         ('linearsvc', LinearSVC(
             C=1.0,
             loss="squared_hinge",
             dual=False,
+            tol=1e-3,
             max_iter=2000,
+            class_weight='balanced',
             random_state=random_state
         )),
         ('rf', RandomForestClassifier(
-            n_estimators=100,
-            max_depth=20,
+            n_estimators=70,
+            max_depth=15,
             min_samples_split=5,
             min_samples_leaf=2,
+            max_features='sqrt',
             n_jobs=-1,
             class_weight='balanced',
             random_state=random_state
         )),
         ('et', ExtraTreesClassifier(
-            n_estimators=100,
-            max_depth=20,
+            n_estimators=70,
+            max_depth=15,
             min_samples_split=5,
             min_samples_leaf=2,
+            max_features='sqrt',
             n_jobs=-1,
             class_weight='balanced',
             random_state=random_state
         )),
         ('dt', DecisionTreeClassifier(
-            max_depth=20,
+            max_depth=15,
             min_samples_split=5,
             min_samples_leaf=2,
             class_weight='balanced',
@@ -46,7 +50,9 @@ def get_base_learners(random_state=42):
             C=1.0,
             loss="squared_hinge",
             dual=False,
+            tol=1e-3,
             max_iter=2000,
+            class_weight='balanced',
             random_state=random_state
             ), cv=3
         ))
@@ -68,8 +74,8 @@ def get_meta_learner(random_state=42):
 
 def get_stacking_classifier(random_state=42):
     """
-    Constrói o Stacking Ensemble otimizado com modelos de base diversificados (LinearSVC Calibrado, RF e Extra Trees).
-    Mantém passthrough=False para focar exclusivamente nas decisões de Nível 0.
+    Constrói o Stacking Ensemble otimizado (LinearSVC Calibrado, RF e Extra Trees).
+    Utiliza StratifiedKFold de 3 splits para otimizar drasticamente o tempo de treinamento.
     """
     base_estimators = get_base_learners(random_state=random_state)
     estimators_dict = dict(base_estimators)
@@ -83,17 +89,19 @@ def get_stacking_classifier(random_state=42):
         stacking_estimators.append(('et', estimators_dict['et']))
     
     meta_learner = get_meta_learner(random_state=random_state)
-    cv_strategy = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
+    # n_splits=3 para acelerar em ~40% a validação cruzada do stacking mantendo alta estabilidade
+    cv_strategy = StratifiedKFold(n_splits=3, shuffle=True, random_state=random_state)
     
     stacking_clf = StackingClassifier(
         estimators=stacking_estimators,
         final_estimator=meta_learner,
         cv=cv_strategy,
-        passthrough=False, # Foca nas meta-features (probabilidades/decisões dos modelos base)
-        n_jobs=-1 # Paraleliza o cross-validation
+        passthrough=False,
+        n_jobs=-1
     )
     
     return stacking_clf
+
 
 
 
