@@ -161,8 +161,6 @@ feature_engineering_and_preprocessing:
       - "Dst IP"
       - "Timestamp"
     constants:
-      - "Bwd Packet Length Min"
-      - "Fwd PSH Flags"
       - "Bwd PSH Flags"
       - "Fwd URG Flags"
       - "Bwd URG Flags"

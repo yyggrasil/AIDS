@@ -64,12 +64,11 @@ def drop_irrelevant_features(df):
     # Identificadores
     columns_to_drop = ['Flow ID', 'Src IP', 'Dst IP', 'Timestamp']
     
-    # Constantes conhecidas (zero variância)
+    # Constantes conhecidas (zero variância comprovada no dataset)
     constant_columns = [
-        'Bwd Packet Length Min', 'Fwd PSH Flags', 'Bwd PSH Flags', 
-        'Fwd URG Flags', 'Bwd URG Flags', 'URG Flag Count', 
-        'CWR Flag Count', 'ECE Flag Count', 'Fwd Bytes/Bulk Avg', 
-        'Fwd Packet/Bulk Avg', 'Fwd Bulk Rate Avg'
+        'Bwd PSH Flags', 'Fwd URG Flags', 'Bwd URG Flags', 
+        'URG Flag Count', 'CWR Flag Count', 'ECE Flag Count', 
+        'Fwd Bytes/Bulk Avg', 'Fwd Packet/Bulk Avg', 'Fwd Bulk Rate Avg'
     ]
     
     columns_to_drop.extend(constant_columns)

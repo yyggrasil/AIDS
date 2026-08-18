@@ -97,7 +97,7 @@ flowchart TD
 
 2. **Limpeza e Seleção de Atributos:**
    - Remoção de colunas identificadoras de rede: `Flow ID`, `Src IP`, `Dst IP`, `Timestamp`.
-   - Remoção de colunas com variância zero/constantes identificadas: `Bwd Packet Length Min`, `Fwd PSH Flags`, `Bwd PSH Flags`, `Fwd URG Flags`, `Bwd URG Flags`, `URG Flag Count`, `CWR Flag Count`, `ECE Flag Count`, `Fwd Bytes/Bulk Avg`, `Fwd Packet/Bulk Avg`, `Fwd Bulk Rate Avg`.
+   - Remoção de colunas com variância zero/constantes identificadas: `Bwd PSH Flags`, `Fwd URG Flags`, `Bwd URG Flags`, `URG Flag Count`, `CWR Flag Count`, `ECE Flag Count`, `Fwd Bytes/Bulk Avg`, `Fwd Packet/Bulk Avg`, `Fwd Bulk Rate Avg`.
    - Conversão de atributos numéricos para `float32` reduzindo o consumo de memória e duplicando a velocidade de computação.
 
 3. **Escalonamento e Pré-processamento (`ColumnTransformer`):**
