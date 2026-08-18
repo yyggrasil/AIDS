@@ -4,5 +4,5 @@ data/
 src/__pycache__
 .env
 /__pycache__
-models/*.joblib
-*.joblib
+models/*
+!models/.gitkeep
