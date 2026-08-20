@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.metrics import confusion_matrix, roc_curve, auc, classification_report
+import joblib
+import pandas as pd
 from sklearn.preprocessing import label_binarize
 
 def evaluate_models(models_dict, X_test, y_test, results_dir='./results', suffix='binary'):
@@ -73,6 +75,12 @@ def evaluate_models(models_dict, X_test, y_test, results_dir='./results', suffix
     # 4. Latência vs F1-Score
     plot_latency_vs_f1(metrics_data, latencies, os.path.join(results_dir, f'latency_vs_f1_{suffix}.png'))
     
+    # 5. Pesos do SVM (LinearSVC)
+    if 'LinearSVC' in models_dict:
+        scaler_path = os.path.join('models', f'scaler_{suffix}.joblib')
+        preprocessor = joblib.load(scaler_path) if os.path.exists(scaler_path) else None
+        plot_svm_weights(models_dict['LinearSVC'], preprocessor, os.path.join(results_dir, f'svm_feature_weights_{suffix}.png'), is_multiclass=is_multiclass)
+
     print(f"Todos os gráficos salvos em {results_dir}")
 
 
@@ -276,3 +284,74 @@ def plot_latency_vs_f1(metrics_data, latencies, save_path):
     plt.tight_layout()
     plt.savefig(save_path)
     plt.close()
+
+def plot_svm_weights(model, preprocessor, save_path, is_multiclass=False, top_n=25):
+    """
+    Plota a importância/pesos (coeficientes) do LinearSVC.
+    """
+    if preprocessor is not None:
+        try:
+            feature_names = preprocessor.get_feature_names_out()
+        except Exception:
+            feature_names = [f"feature_{i}" for i in range(model.coef_.shape[1])]
+    else:
+        feature_names = [f"feature_{i}" for i in range(model.coef_.shape[1])]
+        
+    clean_names = [f.replace('num__', '').replace('cat__', '') for f in feature_names]
+    
+    if not is_multiclass:
+        coefs = model.coef_[0]
+        df = pd.DataFrame({'feature': clean_names, 'coefficient': coefs})
+        df['abs_coef'] = df['coefficient'].abs()
+        df_top = df.sort_values(by='abs_coef', ascending=False).head(top_n).sort_values(by='coefficient', ascending=True)
+        
+        colors = ['#d9534f' if val > 0 else '#428bca' for val in df_top['coefficient']]
+        
+        plt.figure(figsize=(12, 8))
+        bars = plt.barh(df_top['feature'], df_top['coefficient'], color=colors, edgecolor='black', linewidth=0.5)
+        plt.axvline(0, color='black', linestyle='--', linewidth=0.8)
+        plt.xlabel('Valor do Coeficiente (Peso no SVM)', fontsize=12, fontweight='bold')
+        plt.ylabel('Atributo / Feature', fontsize=12, fontweight='bold')
+        plt.title(f'Top {top_n} Atributos por Peso no LinearSVC (Binário)\n[ Azul = Tendência Benigna | Vermelho = Tendência Ataque ]', 
+                  fontsize=14, fontweight='bold', pad=15)
+        plt.grid(True, linestyle=':', alpha=0.6, axis='x')
+        
+        max_val = max(abs(df_top['coefficient'].min()), abs(df_top['coefficient'].max()))
+        offset = max_val * 0.02
+        for bar in bars:
+            width = bar.get_width()
+            ha = 'left' if width >= 0 else 'right'
+            x_pos = width + offset if width >= 0 else width - offset
+            plt.text(x_pos, bar.get_y() + bar.get_height()/2, f'{width:.5f}', 
+                     va='center', ha=ha, fontsize=9, fontweight='bold')
+                     
+        plt.xlim(df_top['coefficient'].min() - max_val * 0.25, df_top['coefficient'].max() + max_val * 0.25)
+        plt.tight_layout()
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=300)
+        plt.close()
+    else:
+        if hasattr(model, 'classes_'):
+            classes = model.classes_
+        else:
+            classes = [f"Classe {i}" for i in range(model.coef_.shape[0])]
+            
+        coef_df = pd.DataFrame(model.coef_, columns=clean_names, index=classes)
+        top_features = coef_df.abs().max(axis=0).sort_values(ascending=False).head(top_n).index
+        coef_df_top = coef_df[top_features].T
+        
+        plt.figure(figsize=(12, 10))
+        sns.heatmap(coef_df_top, cmap='vlag', center=0, annot=True, fmt='.4f', 
+                    cbar_kws={'label': 'Peso / Coeficiente no SVM'},
+                    linewidths=0.5, linecolor='gray')
+                    
+        plt.title(f'Heatmap dos Pesos do LinearSVC por Classe (Top {top_n} Atributos)', 
+                  fontsize=14, fontweight='bold', pad=15)
+        plt.xlabel('Classe de Ataque / Benigno', fontsize=12, fontweight='bold')
+        plt.ylabel('Atributo / Feature', fontsize=12, fontweight='bold')
+        
+        plt.tight_layout()
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=300)
+        plt.close()
+
