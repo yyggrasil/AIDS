@@ -4,7 +4,6 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, RobustScaler, OneHotEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.feature_selection import VarianceThreshold
-from imblearn.over_sampling import SMOTE
 from sklearn.pipeline import Pipeline
 
 def get_preprocessor(numeric_features, categorical_features, scale_type='standard'):
@@ -36,26 +35,6 @@ def get_preprocessor(numeric_features, categorical_features, scale_type='standar
         ])
 
     return preprocessor
-
-def apply_smote(X_train, y_train, random_state=42):
-    """
-    Aplica o SMOTE aos dados de treino para balanceamento.
-    """
-    print(f"Aplicando SMOTE... (Shape antes: {X_train.shape})")
-    
-    min_samples = pd.Series(y_train).value_counts().min()
-    k_neighbors = 5
-    if min_samples <= 5:
-        k_neighbors = max(1, min_samples - 1)
-        
-    if k_neighbors < 1:
-        return X_train, y_train
-
-    smote = SMOTE(random_state=random_state, k_neighbors=k_neighbors)
-    X_res, y_res = smote.fit_resample(X_train, y_train)
-    
-    print(f"SMOTE Concluído. (Shape depois: {X_res.shape})")
-    return X_res, y_res
 
 def drop_irrelevant_features(df):
     """

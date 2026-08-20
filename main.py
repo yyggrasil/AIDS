@@ -3,7 +3,7 @@ import joblib
 from dotenv import load_dotenv
 from sklearn.model_selection import train_test_split
 from src.data_loader import load_data, prepare_target
-from src.preprocessing import drop_irrelevant_features, get_preprocessor, apply_smote
+from src.preprocessing import drop_irrelevant_features, get_preprocessor
 from src.models import get_base_learners, get_stacking_classifier
 from src.evaluation import evaluate_models
 from sklearn.pipeline import Pipeline

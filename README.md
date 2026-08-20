@@ -15,7 +15,7 @@ AIDS_alternativo/
 ├── specs/                      # Especificações e arquitetura do projeto
 ├── src/                        # Código-fonte principal da pipeline
 │   ├── data_loader.py          # Lógica de carregamento de dados e amostragem
-│   ├── preprocessing.py        # Limpeza, Scalers (Standard/Robust) e SMOTE
+│   ├── preprocessing.py        # Limpeza, Scalers (Standard/Robust) e seleção de atributos
 │   ├── models.py               # Algoritmos Base e Stacking Ensemble
 │   └── evaluation.py           # Cálculo de métricas e geração de gráficos (Matplotlib/Seaborn)
 ├── .env                        # Configurações dinâmicas para execução (toggles)
@@ -77,10 +77,9 @@ python main.py
 
 O script realizará automaticamente:
 1. Leitura e descarte inteligente de dados super-dimensionados e de variância nula.
-2. Treinamento de dados balanceados utilizando **SMOTE**.
-3. Construção e Treinamento do **Stacking Ensemble**.
-4. Testes e persistência (pasta `models/`).
-5. Geração e avaliação gráfica (pasta `results/`).
+2. Construção e Treinamento do **Stacking Ensemble**.
+3. Testes e persistência (pasta `models/`).
+4. Geração e avaliação gráfica (pasta `results/`).
 
 ## 📊 Gráficos de Resultados
 
