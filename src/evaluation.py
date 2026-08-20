@@ -126,6 +126,12 @@ def plot_confusion_matrices(y_true, predictions, classes, save_path):
     models = list(predictions.keys())
     n_models = len(models)
     
+    # Se os rótulos forem 0 e 1 (classificação binária), substitui pelos nomes das categorias
+    if len(classes) == 2 and set(classes) == {0, 1}:
+        display_classes = ['Benigno', 'Maligno']
+    else:
+        display_classes = classes
+    
     fig, axes = plt.subplots(1, n_models, figsize=(6 * n_models, 5))
     
     # Se houver apenas 1 modelo, axes não é um array, então colocamos numa lista
@@ -135,7 +141,7 @@ def plot_confusion_matrices(y_true, predictions, classes, save_path):
     for i, model in enumerate(models):
         cm = confusion_matrix(y_true, predictions[model], normalize='true')
         sns.heatmap(cm, annot=True, fmt='.2f', cmap='Blues', ax=axes[i], 
-                    xticklabels=classes, yticklabels=classes)
+                    xticklabels=display_classes, yticklabels=display_classes)
         axes[i].set_title(f'Matriz de Confusão: {model}')
         axes[i].set_xlabel('Predito')
         axes[i].set_ylabel('Verdadeiro')
