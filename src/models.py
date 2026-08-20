@@ -74,7 +74,7 @@ def get_meta_learner(random_state=42):
 
 def get_stacking_classifier(random_state=42):
     """
-    Constrói o Stacking Ensemble otimizado (LinearSVC Calibrado, RF e Extra Trees).
+    Constrói o Stacking Ensemble otimizado contendo apenas LinearSVC Calibrado e Decision Tree (DT).
     Utiliza StratifiedKFold de 3 splits para otimizar drasticamente o tempo de treinamento.
     """
     base_estimators = get_base_learners(random_state=random_state)
@@ -83,10 +83,8 @@ def get_stacking_classifier(random_state=42):
     linearsvc_key = 'linearsvcCalibrated' if 'linearsvcCalibrated' in estimators_dict else 'linearsvc'
     stacking_estimators = [
         (linearsvc_key, estimators_dict[linearsvc_key]),
-        ('rf', estimators_dict['rf'])
+        ('dt', estimators_dict['dt'])
     ]
-    if 'et' in estimators_dict:
-        stacking_estimators.append(('et', estimators_dict['et']))
     
     meta_learner = get_meta_learner(random_state=random_state)
     # n_splits=3 para acelerar em ~40% a validação cruzada do stacking mantendo alta estabilidade
