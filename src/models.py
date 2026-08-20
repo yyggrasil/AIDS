@@ -11,11 +11,11 @@ def get_base_learners(random_state=42):
     """
     estimators = [
         ('linearsvc', LinearSVC(
-            C=1.0,
+            C=0.5,
             loss="squared_hinge",
             dual=False,
-            tol=1e-3,
-            max_iter=2000,
+            tol=1e-4,
+            max_iter=10000,
             class_weight='balanced',
             random_state=random_state
         )),
@@ -47,11 +47,11 @@ def get_base_learners(random_state=42):
             random_state=random_state
         )),
         ('linearsvcCalibrated', CalibratedClassifierCV(LinearSVC(
-            C=1.0,
+            C=0.5,
             loss="squared_hinge",
             dual=False,
-            tol=1e-3,
-            max_iter=2000,
+            tol=1e-4,
+            max_iter=10000,
             class_weight='balanced',
             random_state=random_state
             ), cv=3
