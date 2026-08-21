@@ -70,32 +70,31 @@ def get_base_learners(random_state=42):
 def get_meta_learner(random_state=42):
     """
     Retorna o meta-classificador (Nível 1).
-    Utiliza Regressão Logística regularizada com ponderação equilibrada de classes
-    para sintetizar com máxima acurácia as probabilidades e decisões dos estimadores Nível 0.
+    Utiliza Regressão Logística padrão para combinar de forma balanceada e ótima
+    as probabilidades calibradas geradas pelos estimadores de Nível 0.
     """
     return LogisticRegression(
         C=1.0,
         solver="lbfgs",
         max_iter=2000,
-        class_weight='balanced',
         random_state=random_state
     )
 
 def get_stacking_classifier(random_state=42, passthrough=False):
     """
     Constrói o Stacking Ensemble otimizado (sem estimador de gradiente):
-    - Estimadores Base (Nível 0): LinearSVC (margem linear), RandomForest (redução de variância),
-      ExtraTrees (aleatorização e fronteiras suaves) e DecisionTree (regras ortogonais).
-    - Meta-classificador (Nível 1): Regressão Logística equilibrada operando sobre as
-      distribuições de probabilidade e margens do Nível 0.
+    - Estimadores Base (Nível 0): LinearSVC Calibrado, RandomForest, ExtraTrees e DecisionTree.
+    - Meta-classificador (Nível 1): Regressão Logística operando sobre probabilidades [0, 1].
     - StratifiedKFold de 3 splits para geração de meta-features out-of-fold sem data leakage.
     - passthrough=False: Foca o meta-aprendizado na combinação ótima das predições especializadas.
     """
     base_estimators = get_base_learners(random_state=random_state)
     estimators_dict = dict(base_estimators)
     
+    linearsvc_key = 'linearsvcCalibrated' if 'linearsvcCalibrated' in estimators_dict else 'linearsvc'
+    
     stacking_estimators = [
-        ('linearsvc', estimators_dict['linearsvc']),
+        (linearsvc_key, estimators_dict[linearsvc_key]),
         ('rf', estimators_dict['rf']),
         ('et', estimators_dict['et']),
         ('dt', estimators_dict['dt'])
