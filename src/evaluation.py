@@ -98,28 +98,29 @@ def plot_metrics_bar(metrics_data, save_path):
     fig, ax = plt.subplots(figsize=(10, 6))
     
     for model in models:
-        measurement = [metrics_data[model][m] for m in metrics_list]
+        # Converter para porcentagem (0% a 100%)
+        measurement = [metrics_data[model][m] * 100.0 for m in metrics_list]
         offset = width * multiplier
         rects = ax.bar(x + offset, measurement, width, label=model)
-        # Rotacionar os números em 90 graus e reduzir um pouco a fonte para caber em barras finas
-        ax.bar_label(rects, padding=3, fmt='%.3f', rotation=45, fontsize=9)
+        # Rotacionar os números em 45 graus e formatar como porcentagem (ex: 99.1%)
+        ax.bar_label(rects, padding=3, fmt='%.2f%%', rotation=45, fontsize=9)
         multiplier += 1
 
-    ax.set_ylabel('Scores')
-    ax.set_title('Comparativo de Métricas entre Modelos')
+    ax.set_ylabel('Desempenho (%)', fontsize=11, fontweight='bold')
+    ax.set_title('Comparativo de Métricas entre Modelos (%)', fontsize=13, fontweight='bold')
     
     # Centralizar o label exatamente no meio do bloco de barras
     ax.set_xticks(x + width * (n_models - 1) / 2)
-    ax.set_xticklabels(metrics_list)
+    ax.set_xticklabels(metrics_list, fontsize=10, fontweight='bold')
     
     # Mover a legenda para fora para não sobrepor as barras muito altas
     ax.legend(loc='upper left', bbox_to_anchor=(1, 1))
     
     # Aumentar o limite superior para não cortar os rótulos rotacionados
-    ax.set_ylim(0, 1.2)
+    ax.set_ylim(0, 120)
     
     plt.tight_layout()
-    plt.savefig(save_path)
+    plt.savefig(save_path, dpi=300)
     plt.close()
 
 def plot_confusion_matrices(y_true, predictions, classes, save_path):

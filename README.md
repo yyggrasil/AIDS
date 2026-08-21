@@ -2,9 +2,9 @@
 
 Este projeto consiste em um Sistema de Detecção de Intrusão Baseado em Anomalias e Assinaturas (**AIDS - Anomaly-based Intrusion Detection System**). O objetivo principal é classificar pacotes e fluxos de tráfego de rede entre **Maligno** (ataques como DoS/DDoS, Port Scan, Botnet, Brute Force, etc.) e **Benigno** (tráfego legítimo de rede).
 
-A solução emprega um algoritmo de **Stacking Ensemble (Aprendizado em Camadas)**, combinando as capacidades complementares do **LinearSVC** (alta velocidade linear) e do **Decision Tree (DT)** (captura de regras não-lineares), utilizando uma **Regressão Logística** como meta-classificador.
+A solução emprega um algoritmo de **Stacking Ensemble (Aprendizado em Camadas)** otimizado com `passthrough=True` e validação cruzada estratificada, combinando as capacidades complementares do **LinearSVC** (alta velocidade linear), **Extra Trees (ET)**, **HistGradientBoosting (HGB)** e **Decision Tree (DT)**, utilizando uma **Regressão Logística com Validação Cruzada (LogisticRegressionCV)** como meta-classificador.
 
-## 🚀 Estrutura do Projeto
+## Estrutura do Projeto
 
 ```text
 AIDS_alternativo/
@@ -23,7 +23,7 @@ AIDS_alternativo/
 └── main.py                     # Script orquestrador principal
 ```
 
-## ⚙️ Pré-Requisitos e Instalação
+## Pré-Requisitos e Instalação
 
 É **obrigatório** o uso de um ambiente virtual isolado devido ao manuseio rigoroso das dependências de *Machine Learning*.
 
@@ -44,7 +44,7 @@ AIDS_alternativo/
    pip install -r requirements.txt
    ```
 
-## 🛠️ Configuração (.env)
+## Configuração (.env)
 
 O orquestrador `main.py` utiliza o arquivo `.env` localizado na raiz do projeto para controlar dinamicamente a execução.
 
@@ -67,7 +67,7 @@ RUN_MULTICLASS=False
 SAMPLE_FRAC=0.01
 ```
 
-## ▶️ Executando a Pipeline
+## Executando a Pipeline
 
 Após configurar as opções no seu arquivo `.env`, execute o orquestrador:
 
@@ -81,7 +81,7 @@ O script realizará automaticamente:
 3. Testes e persistência (pasta `models/`).
 4. Geração e avaliação gráfica (pasta `results/`).
 
-## 📊 Gráficos de Resultados
+## Gráficos de Resultados
 
 Para cada modo ativado (Binário ou Multiclasse), as seguintes imagens `.png` são automaticamente construídas com `matplotlib` e `seaborn` na pasta `./results/`:
 - `metrics_comparison_*.png`: Gráfico de barras comparando a Eficiência (*Acurácia, F1-Score, Precisão, Recall*) dos algoritmos base contra o Stacking.
@@ -92,7 +92,7 @@ Para cada modo ativado (Binário ou Multiclasse), as seguintes imagens `.png` s�
 
 ---
 
-## 📑 Dicionário de Colunas e Atributos do Dataset (CICFlowMeter)
+## Dicionário de Colunas e Atributos do Dataset (CICFlowMeter)
 
 O dataset gerado pela ferramenta **CICFlowMeter** extrai 84 métricas estatísticas e temporais a partir de capturas de pacotes de rede (PCAP). A tabela abaixo detalha o significado e a função de cada coluna:
 

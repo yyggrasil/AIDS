@@ -29,9 +29,17 @@ def load_data(file_path: str, sample_frac: float = 1.0, random_state: int = 42) 
         # ou usamos um fallback de sample não-estratificado.
         try:
             df = df.groupby('Label').sample(frac=sample_frac, random_state=random_state)
-        except ValueError:
-            print("Aviso: Falha na amostragem estratificada (possivelmente devido a classes raras). Realizando amostragem aleatória simples...")
+        except Exception:
+            print("Aviso: Falha na amostragem estratificada. Realizando amostragem aleatória simples...")
             df = df.sample(frac=sample_frac, random_state=random_state)
+            
+        # Filtrar classes com menos de 5 amostras para viabilizar StratifiedKFold
+        if 'Label' in df.columns:
+            class_counts = df['Label'].value_counts()
+            rare_classes = class_counts[class_counts < 5].index
+            if len(rare_classes) > 0:
+                print(f"Filtrando {len(rare_classes)} classe(s) com menos de 5 amostras para garantir estabilidade da validação cruzada...")
+                df = df[~df['Label'].isin(rare_classes)]
             
     print(f"Shape final dos dados carregados: {df.shape}")
     return df

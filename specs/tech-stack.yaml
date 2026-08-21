@@ -99,24 +99,26 @@ machine_learning:
         purpose: "Modelo isolado de árvore de decisão única utilizado para comparações de baseline."
 
     meta_learner:
-      name: "Logistic Regression"
-      module: "sklearn.linear_model.LogisticRegression"
+      name: "Logistic Regression CV"
+      module: "sklearn.linear_model.LogisticRegressionCV"
       hyperparameters:
-        C: 1.0
+        Cs: [0.01, 0.1, 1.0, 10.0, 100.0]
+        cv: 3
         solver: "lbfgs"
         max_iter: 1000
         class_weight: "balanced"
         random_state: 42
-      purpose: "Combinação ponderada das probabilidades e decisões dos estimadores de Nível 0."
+      purpose: "Combinação ponderada com ajuste dinâmico da força de regularização via validação cruzada out-of-fold."
 
     stacking_ensemble:
       module: "sklearn.ensemble.StackingClassifier"
       base_estimators:
         - "linearsvcCalibrated"
-        - "rf"
         - "et"
+        - "hgb"
+        - "dt"
       cross_validation: "StratifiedKFold(n_splits=3, shuffle=True, random_state=42)"
-      passthrough: false
+      passthrough: true
       n_jobs: -1
 
 feature_engineering_and_preprocessing:

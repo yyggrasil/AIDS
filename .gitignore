@@ -1,8 +1,47 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Virtual Environments
 .venv/
-venv
-data/
-src/__pycache__
+venv/
+env/
+ENV/
+
+# Environment Variables & Secrets
 .env
-/__pycache__
+.env.local
+.env.*.local
+
+# Datasets (Large Data Files)
+data/
+*.csv
+*.pcap
+*.parquet
+
+# Serialized Models and Checkpoints (Preserve directory with .gitkeep)
 models/*
 !models/.gitkeep
+
+# Unit test / coverage reports
+htmlcov/
+.coverage
+.coverage.*
+.pytest_cache/
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log

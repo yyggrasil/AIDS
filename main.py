@@ -21,6 +21,8 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
     train_linearsvc = os.getenv('TRAIN_LINEARSVC', 'True').strip().lower() == 'true'
     train_dt = os.getenv('TRAIN_DT', 'True').strip().lower() == 'true'
     train_rf = os.getenv('TRAIN_RF', 'True').strip().lower() == 'true'
+    train_et = os.getenv('TRAIN_ET', 'False').strip().lower() == 'true'
+    train_hgb = os.getenv('TRAIN_HGB', 'False').strip().lower() == 'true'
     train_stacking = os.getenv('TRAIN_STACKING', 'True').strip().lower() == 'true'
         
     # 1. Carregar e Preparar Dados
@@ -40,7 +42,7 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     
     # Determina se há algum treinamento a ser feito
-    any_training = train_linearsvc or train_dt or train_rf or train_stacking
+    any_training = train_linearsvc or train_dt or train_rf or train_et or train_hgb or train_stacking
     
     # 3. Pré-processamento
     if any_training:
@@ -110,6 +112,34 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
         if os.path.exists(path):
             print("Carregando RandomForest existente...")
             models_dict['RF'] = joblib.load(path)
+
+    if train_et and 'et' in estimators:
+        print("Treinando ExtraTrees...")
+        m = estimators['et']
+        m.fit(X_train_prep, y_train)
+        models_dict['ET'] = m
+        path = f'models/ET_{target_mode}.joblib'
+        joblib.dump(m, path)
+        print(f"ExtraTrees treinado e salvo com sucesso em {path}")
+    else:
+        path = f'models/ET_{target_mode}.joblib'
+        if os.path.exists(path):
+            print("Carregando ExtraTrees existente...")
+            models_dict['ET'] = joblib.load(path)
+
+    if train_hgb and 'hgb' in estimators:
+        print("Treinando HistGradientBoosting...")
+        m = estimators['hgb']
+        m.fit(X_train_prep, y_train)
+        models_dict['HGB'] = m
+        path = f'models/HGB_{target_mode}.joblib'
+        joblib.dump(m, path)
+        print(f"HistGradientBoosting treinado e salvo com sucesso em {path}")
+    else:
+        path = f'models/HGB_{target_mode}.joblib'
+        if os.path.exists(path):
+            print("Carregando HistGradientBoosting existente...")
+            models_dict['HGB'] = joblib.load(path)
             
     # 5. Treinamento ou Carregamento do Stacking Ensemble
     if train_stacking:

@@ -6,7 +6,7 @@ Este projeto consiste em um Sistema de Detecção de Intrusão Baseado em Anomal
 
 O projeto suporta tanto a **Classificação Binária** (Maligno vs. Benigno) quanto a **Classificação Multiclasse** (identificação dos tipos específicos de ataque).
 
-Para obter alta precisão, excelente poder de generalização e alta performance em datasets de grande escala (ex: `data/CICFlowMeter_out.csv`), a solução emprega um algoritmo de **Stacking Ensemble (Aprendizado em Camadas)**, combinando as capacidades complementares do **LinearSVC (Calibrado)**, **Random Forest** e **Extra Trees**, utilizando a **Regressão Logística** como meta-classificador.
+Para obter alta precisão, excelente poder de generalização e alta performance em datasets de grande escala (ex: `data/CICFlowMeter_out.csv`), a solução emprega um algoritmo de **Stacking Ensemble (Aprendizado em Camadas)** com `passthrough=True`, combinando as capacidades complementares do **LinearSVC**, **Extra Trees**, **HistGradientBoosting** e **Decision Tree**, utilizando a **Regressão Logística com Validação Cruzada (LogisticRegressionCV)** como meta-classificador.
 
 ---
 
@@ -33,6 +33,8 @@ O comportamento da pipeline de treinamento e avaliação é controlado dinamicam
 - `TRAIN_LINEARSVC` (bool): Habilita o treinamento do modelo LinearSVC.
 - `TRAIN_DT` (bool): Habilita o treinamento do modelo Decision Tree.
 - `TRAIN_RF` (bool): Habilita o treinamento do modelo Random Forest.
+- `TRAIN_ET` (bool): Habilita o treinamento do modelo Extra Trees.
+- `TRAIN_HGB` (bool): Habilita o treinamento do modelo HistGradientBoosting.
 - `TRAIN_STACKING` (bool): Habilita o treinamento do Stacking Ensemble.
 - `RUN_BINARY` (bool): Executa o pipeline no modo de classificação binária.
 - `RUN_MULTICLASS` (bool): Executa o pipeline no modo de classificação multiclasse.
@@ -47,12 +49,13 @@ O comportamento da pipeline de treinamento e avaliação é controlado dinamicam
 O Stacking combina múltiplos modelos de classificação (Base Learners - Nível 0) através de um meta-classificador (Meta Learner - Nível 1).
 
 - **Nível 0 (Base Learners / Modelos Suportados):**
-  - **LinearSVC Calibrado (`CalibratedClassifierCV(LinearSVC)`):** Otimizado com complexidade linear $\mathcal{O}(N)$, tolerância `tol=1e-3` para rápida convergência, encapsulado com validação cruzada de 3 folds para calibração de probabilidades de classe, permitindo a geração de vetores de probabilidade para o Stacking.
-  - **Random Forest Classifier:** Ensemble de Árvores de Decisão otimizado (`n_estimators=70`, `max_depth=15`), amostragem *bootstrap*, amostragem aleatória de atributos e `class_weight='balanced'`.
+  - **LinearSVC (`LinearSVC`):** Otimizado com complexidade linear $\mathcal{O}(N)$, tolerância `tol=1e-4`, integrando scores de decisão (`decision_function`) diretamente ao Stacking sem *leakage*.
+  - **HistGradientBoosting Classifier:** Algoritmo baseado em histogramas para dados tabulares rápidos e robustos, capturando relações não-lineares complexas.
   - **Extra Trees Classifier:** Ensemble de árvores extremamente aleatorizadas otimizado (`n_estimators=70`, `max_depth=15`) com `class_weight='balanced'`.
-  - **Decision Tree Classifier:** Árvore de decisão individual (`max_depth=15`) com `class_weight='balanced'`, utilizada como modelo baseline comparativo.
+  - **Decision Tree Classifier:** Árvore de decisão individual (`max_depth=15`) com `class_weight='balanced'`, utilizada como baseline estruturado de regras.
+  - **Random Forest Classifier:** Suportado como modelo base independente otimizado (`n_estimators=70`, `max_depth=15`).
 - **Nível 1 (Meta-Learner):**
-  - **Regressão Logística (`LogisticRegression`):** Configurada com `class_weight='balanced'`, `C=1.0` e `solver='lbfgs'`. Combina de forma ponderada as probabilidades/decisões calculadas pelos estimadores de Nível 0 (`linearsvcCalibrated`, `rf`, `et`).
+  - **Regressão Logística com CV (`LogisticRegressionCV`):** Configurada com `class_weight='balanced'`, grade de busca para `Cs` e `cv=3`. Combina de forma ponderada e regularizada as probabilidades/decisões calculadas pelos estimadores de Nível 0 juntamente com as features originais (`passthrough=True`).
 
 ```mermaid
 flowchart TD
@@ -62,19 +65,21 @@ flowchart TD
     D --> E[ColumnTransformer: Imputer + VarianceThreshold + RobustScaler / OneHotEncoder float32]
 
     subgraph Nível 0 - Base Learners
-        E --> F[LinearSVC Calibrado - CalibratedClassifierCV]
-        E --> G[Random Forest Classifier]
-        E --> H[Extra Trees Classifier]
+        E --> F[LinearSVC - Decision Function]
+        E --> G[Extra Trees Classifier]
+        E --> H[HistGradientBoosting Classifier]
+        E --> I[Decision Tree Classifier]
     end
 
-    F --> I[Probabilidades LinearSVC]
-    G --> J[Probabilidades Random Forest]
-    H --> K[Probabilidades Extra Trees]
+    F --> J[Meta-Features: Decisões & Probabilidades]
+    G --> J
+    H --> J
+    I --> J
+    E -.->|passthrough=True: Features Originais X| K[Meta-Input Concat]
+    J --> K
 
     subgraph Nível 1 - Meta Learner
-        I --> L[Meta-Classificador - Regressão Logística Balanced]
-        J --> L
-        K --> L
+        K --> L[Meta-Classificador - LogisticRegressionCV Balanced]
     end
 
     L --> M{Classificação Final}
