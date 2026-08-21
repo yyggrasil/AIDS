@@ -11,7 +11,6 @@ class TestModels(unittest.TestCase):
         self.assertIn('linearsvc', names)
         self.assertIn('rf', names)
         self.assertIn('et', names)
-        self.assertIn('hgb', names)
         self.assertIn('dt', names)
 
     def test_get_meta_learner(self):
@@ -28,7 +27,7 @@ class TestModels(unittest.TestCase):
             random_state=42
         )
         
-        stacking_clf = get_stacking_classifier(random_state=42, passthrough=True)
+        stacking_clf = get_stacking_classifier(random_state=42, passthrough=False)
         stacking_clf.fit(X, y)
         
         preds = stacking_clf.predict(X)

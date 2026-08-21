@@ -2,7 +2,7 @@
 
 Este projeto consiste em um Sistema de Detecção de Intrusão Baseado em Anomalias e Assinaturas (**AIDS - Anomaly-based Intrusion Detection System**). O objetivo principal é classificar pacotes e fluxos de tráfego de rede entre **Maligno** (ataques como DoS/DDoS, Port Scan, Botnet, Brute Force, etc.) e **Benigno** (tráfego legítimo de rede).
 
-A solução emprega um algoritmo de **Stacking Ensemble (Aprendizado em Camadas)** otimizado com `passthrough=True` e validação cruzada estratificada, combinando as capacidades complementares do **LinearSVC** (alta velocidade linear), **Extra Trees (ET)**, **HistGradientBoosting (HGB)** e **Decision Tree (DT)**, utilizando uma **Regressão Logística com Validação Cruzada (LogisticRegressionCV)** como meta-classificador.
+A solução emprega um algoritmo de **Stacking Ensemble (Aprendizado em Camadas)** otimizado com validação cruzada estratificada, combinando as capacidades complementares do **LinearSVC** (alta velocidade linear), **Random Forest (RF)** (redução de variância), **Extra Trees (ET)** (fronteiras suaves) e **Decision Tree (DT)** (regras ortogonais), utilizando uma **Regressão Logística** como meta-classificador.
 
 ## Estrutura do Projeto
 
