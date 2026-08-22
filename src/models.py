@@ -91,10 +91,8 @@ def get_stacking_classifier(random_state=42, passthrough=False):
     base_estimators = get_base_learners(random_state=random_state)
     estimators_dict = dict(base_estimators)
     
-    linearsvc_key = 'linearsvcCalibrated' if 'linearsvcCalibrated' in estimators_dict else 'linearsvc'
-    
     stacking_estimators = [
-        (linearsvc_key, estimators_dict[linearsvc_key]),
+        ('linearsvc', estimators_dict['linearsvc']),
         ('rf', estimators_dict['rf']),
         ('et', estimators_dict['et']),
         ('dt', estimators_dict['dt'])
