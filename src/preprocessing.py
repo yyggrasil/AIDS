@@ -1,27 +1,40 @@
 import pandas as pd
 import numpy as np
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import StandardScaler, RobustScaler, OneHotEncoder
+from sklearn.preprocessing import StandardScaler, RobustScaler, OneHotEncoder, FunctionTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.pipeline import Pipeline
 
-def get_preprocessor(numeric_features, categorical_features, scale_type='standard'):
+def _log1p_clip(x):
+    return np.log1p(np.clip(x, 0, None))
+
+def get_preprocessor(numeric_features, categorical_features, scale_type='log_standard'):
     """
     Constrói o pré-processador do scikit-learn otimizado para float32.
-    scale_type: 'standard' ou 'robust'
+    scale_type: 'log_standard' (recomendado para tráfego de rede e SVM), 'standard' ou 'robust'
     """
-    
-    if scale_type == 'robust':
-        scaler = RobustScaler()
+    if scale_type == 'log_standard':
+        numeric_steps = [
+            ('imputer', SimpleImputer(strategy='median')),
+            ('variance', VarianceThreshold(threshold=0.0)),
+            ('log1p', FunctionTransformer(_log1p_clip)),
+            ('scaler', StandardScaler())
+        ]
+    elif scale_type == 'robust':
+        numeric_steps = [
+            ('imputer', SimpleImputer(strategy='median')),
+            ('variance', VarianceThreshold(threshold=0.0)),
+            ('scaler', RobustScaler())
+        ]
     else:
-        scaler = StandardScaler()
+        numeric_steps = [
+            ('imputer', SimpleImputer(strategy='median')),
+            ('variance', VarianceThreshold(threshold=0.0)),
+            ('scaler', StandardScaler())
+        ]
         
-    numeric_transformer = Pipeline(steps=[
-        ('imputer', SimpleImputer(strategy='median')),
-        ('variance', VarianceThreshold(threshold=0.0)),
-        ('scaler', scaler)
-    ])
+    numeric_transformer = Pipeline(steps=numeric_steps)
 
     categorical_transformer = Pipeline(steps=[
         ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),

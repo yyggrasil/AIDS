@@ -23,6 +23,7 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
     train_rf = os.getenv('TRAIN_RF', 'True').strip().lower() == 'true'
     train_et = os.getenv('TRAIN_ET', 'False').strip().lower() == 'true'
     train_hgb = os.getenv('TRAIN_HGB', 'False').strip().lower() == 'true'
+    train_mlp = os.getenv('TRAIN_MLP', 'True').strip().lower() == 'true'
     train_stacking = os.getenv('TRAIN_STACKING', 'True').strip().lower() == 'true'
         
     # 1. Carregar e Preparar Dados
@@ -42,12 +43,12 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     
     # Determina se há algum treinamento a ser feito
-    any_training = train_linearsvc or train_dt or train_rf or train_et or train_hgb or train_stacking
+    any_training = train_linearsvc or train_dt or train_rf or train_et or train_hgb or train_mlp or train_stacking
     
     # 3. Pré-processamento
     if any_training:
         print("\nAplicando Transformações (Scaler, OneHot, VarianceThreshold)...")
-        preprocessor = get_preprocessor(numeric_features, categorical_features, scale_type='robust')
+        preprocessor = get_preprocessor(numeric_features, categorical_features, scale_type='log_standard')
         X_train_prep = preprocessor.fit_transform(X_train)
         X_test_prep = preprocessor.transform(X_test)
         
@@ -140,6 +141,20 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
         if os.path.exists(path):
             print("Carregando HistGradientBoosting existente...")
             models_dict['HGB'] = joblib.load(path)
+
+    if train_mlp and 'mlp' in estimators:
+        print("Treinando Mini Rede Neural (MLP)...")
+        m = estimators['mlp']
+        m.fit(X_train_prep, y_train)
+        models_dict['MLP'] = m
+        path = f'models/MLP_{target_mode}.joblib'
+        joblib.dump(m, path)
+        print(f"Mini Rede Neural (MLP) treinada e salva com sucesso em {path}")
+    else:
+        path = f'models/MLP_{target_mode}.joblib'
+        if os.path.exists(path):
+            print("Carregando Mini Rede Neural (MLP) existente...")
+            models_dict['MLP'] = joblib.load(path)
             
     # 5. Treinamento ou Carregamento do Stacking Ensemble
     if train_stacking:

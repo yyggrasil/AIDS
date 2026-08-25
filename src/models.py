@@ -5,10 +5,34 @@ from sklearn.ensemble import (
     StackingClassifier
 )
 from sklearn.linear_model import LogisticRegressionCV, LogisticRegression
+from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import StratifiedKFold
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.calibration import CalibratedClassifierCV
 import numpy as np
+
+def get_mini_neural_network(random_state=42):
+    """
+    Retorna uma Mini Rede Neural (Multi-Layer Perceptron - MLP) otimizada para
+    classificação rápida e eficiente de tráfego de rede tabular:
+    - Arquitetura: 2 camadas ocultas compactas (64, 32 neurônios).
+    - Ativação: ReLU com otimizador Adam e regularização L2 (alpha=0.0001).
+    - Early Stopping: Habilitado para evitar overfitting e acelerar convergência.
+    """
+    return MLPClassifier(
+        hidden_layer_sizes=(64, 32),
+        activation='relu',
+        solver='adam',
+        alpha=0.0001,
+        batch_size=128,
+        learning_rate='adaptive',
+        learning_rate_init=0.001,
+        max_iter=200,
+        early_stopping=True,
+        n_iter_no_change=10,
+        validation_fraction=0.1,
+        random_state=random_state
+    )
 
 def get_base_learners(random_state=42):
     """
@@ -17,7 +41,7 @@ def get_base_learners(random_state=42):
     """
     estimators = [
         ('linearsvc', LinearSVC(
-            C=0.5,
+            C=1.0,
             loss="squared_hinge",
             dual="auto",
             tol=1e-3,
@@ -54,8 +78,9 @@ def get_base_learners(random_state=42):
             class_weight='balanced',
             random_state=random_state
         )),
+        ('mlp', get_mini_neural_network(random_state=random_state)),
         ('linearsvcCalibrated', CalibratedClassifierCV(LinearSVC(
-            C=0.5,
+            C=1.0,
             loss="squared_hinge",
             dual="auto",
             tol=1e-3,
