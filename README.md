@@ -8,19 +8,29 @@ A solução emprega um algoritmo de **Stacking Ensemble (Aprendizado em Camadas)
 
 ```text
 AIDS_alternativo/
-├── data/
-│   └── CICFlowMeter_out.csv    # Dataset principal de tráfego (84 colunas)
-├── models/                     # Diretório onde os modelos (.joblib) são salvos
-├── results/                    # Gráficos de avaliação salvos após os testes
-├── specs/                      # Especificações e arquitetura do projeto
-├── src/                        # Código-fonte principal da pipeline
-│   ├── data_loader.py          # Lógica de carregamento de dados e amostragem
-│   ├── preprocessing.py        # Limpeza, Scalers (Standard/Robust) e seleção de atributos
-│   ├── models.py               # Algoritmos Base e Stacking Ensemble
-│   └── evaluation.py           # Cálculo de métricas e geração de gráficos (Matplotlib/Seaborn)
-├── .env                        # Configurações dinâmicas para execução (toggles)
+├── data/                       # Dataset de tráfego de rede (CICFlowMeter_out.csv)
+├── models/                     # Modelos serializados e pipelines (.joblib)
+├── results/                    # Gráficos comparativos de métricas e latência (.png)
+├── specs/                      # Especificações de arquitetura e stack tecnológica
+├── src/                        # Código-fonte do pipeline de treinamento e avaliação
+│   ├── data_loader.py          # Leitura de dados e amostragem estratificada
+│   ├── preprocessing.py        # Limpeza, Log1p + StandardScaler e seleção de atributos
+│   ├── models.py               # Estimadores Base (LinearSVC, RF, ET, DT, MLP) e Stacking
+│   └── evaluation.py           # Cálculo de métricas e geração visual (Matplotlib/Seaborn)
+├── raspberry_pi/               # 🍓 Módulo Edge dedicado para Raspberry Pi
+│   ├── flow_aggregator.py      # Agregador de fluxos bidirecionais (5-tuple & 70 features)
+│   ├── email_alert.py          # Alertas por e-mail via SMTP seguro com Anti-Flood
+│   ├── rpi_detector.py         # Motor de inferência em tempo real com Scapy
+│   ├── rpi_monitor.py          # CLI de monitoramento contínuo no Raspberry Pi
+│   ├── aids-rpi.service        # Unit file systemd para inicialização automática no boot
+│   ├── requirements.txt        # Dependências específicas para Raspberry Pi OS
+│   ├── .env.example            # Exemplo de configuração SMTP e de rede no RPi
+│   └── README.md               # Guia passo a passo completo de Edge Deployment
+├── tests/                      # Testes unitários automatizados (15 testes)
+├── .env                        # Configurações dinâmicas de treinamento
 ├── requirements.txt            # Dependências Python do projeto
-└── main.py                     # Script orquestrador principal
+├── main.py                     # Script orquestrador de treinamento e avaliação
+└── rpi_monitor.py              # Launcher rápido para execução do monitor de Raspberry Pi
 ```
 
 ## Pré-Requisitos e Instalação
@@ -44,9 +54,37 @@ AIDS_alternativo/
    pip install -r requirements.txt
    ```
 
-## Configuração (.env)
+---
 
-O orquestrador `main.py` utiliza o arquivo `.env` localizado na raiz do projeto para controlar dinamicamente a execução.
+## 🍓 Monitoramento em Tempo Real no Raspberry Pi (Edge IDS)
+
+O projeto inclui uma solução de ponta a ponta pronta para rodar em **Raspberry Pi (3B+, 4B, 5 ou Zero 2 W)**:
+- **Sniffing ao Vivo:** Captura pacotes brutos na interface (`eth0`, `wlan0`, `end0`).
+- **Extração de Fluxo:** Agrupa em 5-tuplas e calcula em tempo real as 70 métricas do padrão CICFlowMeter.
+- **Detecção com Stacking:** Executa inferência com o modelo Stacking de alta performance.
+- **Alertas por E-mail:** Envia e-mails automáticos (HTML/Texto) via SMTP TLS/SSL para a equipe de segurança quando ataques forem detectados.
+- **Proteção Anti-Flood:** Sistema de *cooldown* inteligente para evitar rajadas de e-mails em ataques volumosos (DDoS / PortScan).
+
+### Como Executar no Raspberry Pi:
+
+Consulte o guia completo em [**`raspberry_pi/README.md`**](file:///home/yggdrasil/Work/AIDS_alternativo/raspberry_pi/README.md) ou inicie diretamente via CLI:
+
+```bash
+# 1. Testar conexão SMTP e envio de alerta simulado:
+python rpi_monitor.py --test-email
+
+# 2. Iniciar monitoramento ao vivo na interface eth0:
+python rpi_monitor.py --interface eth0 --mode binary
+
+# 3. Modo simulação (Dry-Run sem enviar e-mails reais):
+python rpi_monitor.py --interface eth0 --dry-run
+```
+
+---
+
+## Configuração do Treinamento (.env)
+
+O orquestrador `main.py` utiliza o arquivo `.env` localizado na raiz do projeto para controlar dinamicamente o treinamento.
 
 Abra o arquivo `.env` para ligar ou desligar os algoritmos e modos de teste desejados:
 
@@ -55,6 +93,7 @@ Abra o arquivo `.env` para ligar ou desligar os algoritmos e modos de teste dese
 TRAIN_LINEARSVC=True
 TRAIN_DT=True
 TRAIN_RF=True
+TRAIN_MLP=True
 
 # Treinar o Stacking Ensemble?
 TRAIN_STACKING=True
@@ -67,7 +106,7 @@ RUN_MULTICLASS=False
 SAMPLE_FRAC=0.01
 ```
 
-## Executando a Pipeline
+## Executando o Treinamento do Modelo
 
 Após configurar as opções no seu arquivo `.env`, execute o orquestrador:
 
@@ -77,9 +116,10 @@ python main.py
 
 O script realizará automaticamente:
 1. Leitura e descarte inteligente de dados super-dimensionados e de variância nula.
-2. Construção e Treinamento do **Stacking Ensemble**.
-3. Testes e persistência (pasta `models/`).
-4. Geração e avaliação gráfica (pasta `results/`).
+2. Aplicação do pré-processamento `log_standard` (`FunctionTransformer(np.log1p) + StandardScaler`).
+3. Construção e Treinamento do **LinearSVC Otimizado** e do **Stacking Ensemble**.
+4. Testes e persistência (pasta `models/`).
+5. Geração e avaliação gráfica (pasta `results/`).
 
 ## Gráficos de Resultados
 

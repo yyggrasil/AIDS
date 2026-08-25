@@ -1,12 +1,12 @@
 project:
   name: "AIDS-Alternative-Traffic-Detection"
-  description: "Algoritmo de Machine Learning para Detecção de Tráfego de Rede Maligno e Benigno usando Stacking Ensemble (LinearSVC Calibrado + Random Forest + Extra Trees) em modos Binário e Multiclasse"
+  description: "Sistema de Detecção de Intrusão Baseado em Anomalias e Assinaturas (AIDS) utilizando Stacking Ensemble (LinearSVC Calibrado + Random Forest + Extra Trees + Decision Tree) com Meta-Classificador de Regressão Logística em modos Binário e Multiclasse"
   version: "1.0.0"
   domain: "Cybersecurity / Intrusion Detection System (AIDS)"
 
 environment:
   python:
-    version: ">=3.10, <3.12"
+    version: ">=3.10"
   virtual_environment:
     mandatory: true
     tool: "venv"
@@ -14,33 +14,74 @@ environment:
     activation:
       windows: ".venv\\Scripts\\activate"
       linux_mac: "source .venv/bin/activate"
-    description: "Obrigatório a criação e ativação de um ambiente virtual Python (.venv) para isolar todas as dependências do projeto."
+    description: "Ambiente virtual Python (.venv) obrigatório para isolamento e reprodutibilidade das dependências de Machine Learning."
   configuration:
     tool: "python-dotenv"
     file: ".env"
     description: "Arquivo de configuração dinâmico para controle de amostragem, toggles de treinamento de modelos e modos de execução (binário/multiclasse)."
+    environment_variables:
+      - name: "TRAIN_LINEARSVC"
+        type: "bool"
+        default: "True"
+        description: "Habilita ou desabilita o treinamento do modelo LinearSVC isolado."
+      - name: "TRAIN_DT"
+        type: "bool"
+        default: "True"
+        description: "Habilita ou desabilita o treinamento do modelo Decision Tree isolado."
+      - name: "TRAIN_RF"
+        type: "bool"
+        default: "True"
+        description: "Habilita ou desabilita o treinamento do modelo Random Forest isolado."
+      - name: "TRAIN_ET"
+        type: "bool"
+        default: "False"
+        description: "Habilita ou desabilita o treinamento do modelo Extra Trees isolado."
+      - name: "TRAIN_HGB"
+        type: "bool"
+        default: "False"
+        description: "Habilita ou desabilita o treinamento do modelo HistGradientBoosting isolado."
+      - name: "TRAIN_MLP"
+        type: "bool"
+        default: "True"
+        description: "Habilita ou desabilita o treinamento da Mini Rede Neural (MLPClassifier) isolada."
+      - name: "TRAIN_STACKING"
+        type: "bool"
+        default: "True"
+        description: "Habilita ou desabilita o treinamento do Stacking Ensemble."
+      - name: "RUN_BINARY"
+        type: "bool"
+        default: "True"
+        description: "Executa o pipeline em modo de classificação binária (Benigno vs Maligno)."
+      - name: "RUN_MULTICLASS"
+        type: "bool"
+        default: "False"
+        description: "Executa o pipeline em modo de classificação multiclasse (classes específicas de ataque)."
+      - name: "SAMPLE_FRAC"
+        type: "float"
+        default: "0.1"
+        description: "Fração de amostragem estratificada do dataset (ex: 0.01 = 1%, 0.1 = 10%, 1.0 = 100%)."
 
 core_libraries:
   data_manipulation:
     - name: "pandas"
-      version: "^2.1.0"
-      purpose: "Carregamento, amostragem estratificada, limpeza de nulos/infinitos e manipulação dos dados de tráfego de rede."
+      version: ">=2.1.0"
+      purpose: "Carregamento de dados CSV, limpeza de cabeçalhos, amostragem estratificada com tratamento de classes raras e descarte de colunas irrelevantes."
     - name: "numpy"
-      version: "^1.26.0"
-      purpose: "Operações vetoriais, tratamento de valores inf/nan e suporte numérico de alta performance."
+      version: ">=1.26.0"
+      purpose: "Operações vetoriais, conversão e casting para float32 e substituição de infinitos por NaN."
   configuration_management:
     - name: "python-dotenv"
-      version: "^1.0.0"
-      purpose: "Carregamento automatizado das configurações de execução contidas no arquivo .env."
+      version: ">=1.0.0"
+      purpose: "Carregamento automático de variáveis de ambiente a partir do arquivo .env."
 
 machine_learning:
   framework: "scikit-learn"
-  version: "^1.3.0"
+  version: ">=1.3.0"
   execution_modes:
     - name: "binary"
       description: "Classificação em duas classes: Benigno (0) vs Maligno (1)."
     - name: "multiclass"
-      description: "Classificação direta nos rótulos de tipo de ataque presentes no dataset."
+      description: "Classificação nos tipos específicos de ataques presentes no dataset."
   components:
     base_learners:
       - name: "Linear Support Vector Classifier (LinearSVC)"
@@ -48,55 +89,74 @@ machine_learning:
         hyperparameters:
           C: 1.0
           loss: "squared_hinge"
-          dual: false
+          dual: "auto"
           tol: 1e-3
-          max_iter: 2000
+          max_iter: 5000
           class_weight: "balanced"
           random_state: 42
-        purpose: "Classificador SVM linear de alta velocidade O(N), com tolerância de convergência otimizada para rápida computação."
+        purpose: "Classificador linear de margens rígidas em complexidade O(N), com balanceamento de classes e tolerância acelerada."
 
       - name: "Calibrated LinearSVC"
         module: "sklearn.calibration.CalibratedClassifierCV"
         hyperparameters:
-          base_estimator: "LinearSVC(C=1.0, loss='squared_hinge', dual=False, tol=1e-3, max_iter=2000, class_weight='balanced', random_state=42)"
+          estimator: "LinearSVC(C=1.0, loss='squared_hinge', dual='auto', tol=1e-3, max_iter=5000, class_weight='balanced', random_state=42)"
           cv: 3
-        purpose: "Empacotamento do LinearSVC para calibração de probabilidades de classe necessárias no Stacking."
+        purpose: "Empacotamento do LinearSVC para calibração de probabilidades isotônicas/sigmoides necessárias para integração probabilística no Stacking."
 
       - name: "Random Forest Classifier"
         module: "sklearn.ensemble.RandomForestClassifier"
         hyperparameters:
-          n_estimators: 70
+          n_estimators: 100
           max_depth: 15
-          min_samples_split: 5
+          min_samples_split: 4
           min_samples_leaf: 2
           max_features: "sqrt"
           class_weight: "balanced"
-          n_jobs: -1
+          n_jobs: 1
           random_state: 42
-        purpose: "Ensemble de árvores de decisão otimizado com amostragem bootstrap e balanceamento de peso de classes."
+        purpose: "Ensemble de árvores por bagging com controle de profundidade para redução de variância e balanceamento de classes."
 
       - name: "Extra Trees Classifier"
         module: "sklearn.ensemble.ExtraTreesClassifier"
         hyperparameters:
-          n_estimators: 70
+          n_estimators: 100
           max_depth: 15
-          min_samples_split: 5
+          min_samples_split: 4
           min_samples_leaf: 2
           max_features: "sqrt"
           class_weight: "balanced"
-          n_jobs: -1
+          n_jobs: 1
           random_state: 42
-        purpose: "Ensemble de árvores extremamente aleatórias aumentando a diversidade dos estimadores base do Stacking."
+        purpose: "Ensemble de árvores com cortes extremamente aleatorizados para maximizar diversidade dos estimadores base do Stacking."
 
       - name: "Decision Tree Classifier"
         module: "sklearn.tree.DecisionTreeClassifier"
         hyperparameters:
+          criterion: "entropy"
           max_depth: 15
           min_samples_split: 5
           min_samples_leaf: 2
+          ccp_alpha: 0.0001
           class_weight: "balanced"
           random_state: 42
-        purpose: "Modelo isolado de árvore de decisão única utilizado para comparações de baseline."
+        purpose: "Árvore de decisão com critério de ganho de informação (entropia) e poda de complexidade de custo (ccp_alpha) para regras de decisão limpas."
+
+      - name: "Mini Neural Network (MLPClassifier)"
+        module: "sklearn.neural_network.MLPClassifier"
+        hyperparameters:
+          hidden_layer_sizes: [64, 32]
+          activation: "relu"
+          solver: "adam"
+          alpha: 0.0001
+          batch_size: 128
+          learning_rate: "adaptive"
+          learning_rate_init: 0.001
+          max_iter: 200
+          early_stopping: true
+          n_iter_no_change: 10
+          validation_fraction: 0.1
+          random_state: 42
+        purpose: "Mini Rede Neural Multi-Layer Perceptron compacta de 2 camadas ocultas para mapeamento não-linear de tráfego de rede e benchmark comparativo com modelos baseados em árvores e SVM."
 
     meta_learner:
       name: "Logistic Regression"
@@ -105,55 +165,53 @@ machine_learning:
         C: 1.0
         solver: "lbfgs"
         max_iter: 2000
-        class_weight: "balanced"
         random_state: 42
-      purpose: "Combinação ponderada das probabilidades e decisões dos estimadores de Nível 0."
+      purpose: "Meta-classificador de Nível 1 que aprende a ponderação regularizada ótima sobre as probabilidades preditas pelos estimadores base."
 
     stacking_ensemble:
       module: "sklearn.ensemble.StackingClassifier"
       base_estimators:
-        - "linearsvc"
+        - "linearsvcCalibrated"
         - "rf"
         - "et"
         - "dt"
+      final_estimator: "LogisticRegression(C=1.0, solver='lbfgs', max_iter=2000, random_state=42)"
       cross_validation: "StratifiedKFold(n_splits=3, shuffle=True, random_state=42)"
+      stack_method: "auto"
       passthrough: false
       n_jobs: -1
+      purpose: "Combinação hierárquica em camadas dos 4 estimadores base com geração out-of-fold de meta-atributos sem vazamento de dados."
 
 feature_engineering_and_preprocessing:
   pipeline_structure: "ColumnTransformer com Pipelines dedicados para variáveis numéricas e categóricas"
   scaling:
     - name: "RobustScaler"
       module: "sklearn.preprocessing.RobustScaler"
-      purpose: "Escalonamento robusto a ruídos e outliers numéricos (opção padrão do pipeline)."
+      purpose: "Escalonamento numérico robusto baseado em mediana e IQR para amortecer o impacto de outliers de tráfego (padrão)."
     - name: "StandardScaler"
       module: "sklearn.preprocessing.StandardScaler"
-      purpose: "Padronização Z-score para atributos numéricos."
+      purpose: "Padronização Z-score opcional para atributos numéricos."
 
   imputation_and_selection:
     - name: "SimpleImputer"
       module: "sklearn.impute.SimpleImputer"
-      purpose: "Preenchimento de valores ausentes (estratégia 'median' para numéricos e 'constant' para categóricos)."
+      purpose: "Preenchimento de valores ausentes (estratégia 'median' para numéricos e 'constant' com valor 'missing' para categóricos)."
     - name: "VarianceThreshold"
       module: "sklearn.feature_selection.VarianceThreshold"
       threshold: 0.0
-      purpose: "Remoção automática de atributos com variância zero após imputação."
+      purpose: "Remoção automática de atributos com variância zero após a etapa de imputação."
 
   encoding:
     - name: "OneHotEncoder"
       module: "sklearn.preprocessing.OneHotEncoder"
       hyperparameters:
         handle_unknown: "ignore"
-      purpose: "Codificação One-Hot para variáveis categóricas (ex: atributo Protocol)."
+        dtype: "np.float32"
+      purpose: "Codificação One-Hot otimizada em float32 para variáveis categóricas (ex: atributo Protocol)."
 
   imbalance_handling:
-    - name: "SMOTE"
-      package: "imbalanced-learn"
-      version: "^0.11.0"
-      module: "imblearn.over_sampling.SMOTE"
-      purpose: "Balanceamento sintético de amostras da classe minoria com adaptação dinâmica de k_neighbors."
     - name: "class_weight"
-      purpose: "Ponderação automática 'balanced' incorporada aos modelos Random Forest, Extra Trees, Decision Tree e Logistic Regression."
+      purpose: "Ponderação automática 'balanced' incorporada aos modelos LinearSVC, Random Forest, Extra Trees e Decision Tree para compensar desproporção entre tráfego benigno e ataques."
 
   feature_dropping:
     identifiers:
@@ -174,17 +232,17 @@ feature_engineering_and_preprocessing:
 
 model_persistence:
   library: "joblib"
-  version: "^1.3.0"
+  version: ">=1.3.0"
   target_directory: "./models"
   format: ".joblib"
   naming_pattern: "models/{model_name}_{target_mode}.joblib"
   saved_artifacts:
     - name: "stacking_pipeline"
       path: "./models/stacking_pipeline_{target_mode}.joblib"
-      description: "Pipeline completo contendo o ColumnTransformer e o Stacking Classifier."
+      description: "Pipeline completo unificado contendo o ColumnTransformer e o Stacking Classifier treinado."
     - name: "scaler"
       path: "./models/scaler_{target_mode}.joblib"
-      description: "Objeto ColumnTransformer pré-processador ajustado."
+      description: "Objeto ColumnTransformer pré-processador ajustado (scaler, imputer, one-hot encoder e variance threshold)."
     - name: "meta_learner"
       path: "./models/meta_learner_{target_mode}.joblib"
       description: "Meta-classificador final de Regressão Logística extraído do Stacking."
@@ -193,38 +251,74 @@ model_persistence:
         - "./models/LinearSVC_{target_mode}.joblib"
         - "./models/DT_{target_mode}.joblib"
         - "./models/RF_{target_mode}.joblib"
+        - "./models/ET_{target_mode}.joblib"
+        - "./models/HGB_{target_mode}.joblib"
+        - "./models/MLP_{target_mode}.joblib"
         - "./models/Stacking_{target_mode}.joblib"
-      description: "Modelos isolados e Stacking serializados para uso independente."
+      description: "Modelos individuais e ensemble serializados para avaliação e inferência independente."
 
 visualization_and_metrics:
   plotting_libraries:
     - name: "matplotlib"
-      version: "^3.8.0"
+      version: ">=3.8.0"
       modules:
         - "matplotlib.pyplot"
-      purpose: "Geração de gráficos comparativos (barras de métricas, curvas ROC com zoom e scatter de latência vs F1-score)."
+      purpose: "Geração de gráficos comparativos (barras agrupadas, curvas ROC com zoom embutido, scatter de latência vs F1 e pesos de coeficientes do SVM)."
     - name: "seaborn"
-      version: "^0.13.0"
+      version: ">=0.13.0"
       modules:
         - "seaborn.heatmap"
-      purpose: "Renderização de matrizes de confusão em subplots normalizados."
+      purpose: "Renderização de matrizes de confusão normalizadas e heatmaps de pesos do LinearSVC por classe."
 
   metrics_and_evaluation:
     framework: "scikit-learn"
     module: "sklearn.metrics"
     metrics_list:
       - name: "accuracy_score"
-        purpose: "Acurácia global do modelo."
+        purpose: "Acurácia global de predição."
       - name: "precision_score"
-        purpose: "Precisão (suporta média 'binary' e 'macro' para multiclasse)."
+        purpose: "Precisão (média 'binary' para modo binário e 'macro' para modo multiclasse)."
       - name: "recall_score"
-        purpose: "Sensibilidade (suporta média 'binary' e 'macro' para multiclasse)."
+        purpose: "Sensibilidade/Revocação (média 'binary' para binário e 'macro' para multiclasse)."
       - name: "f1_score"
-        purpose: "Média harmônica entre Precisão e Recall."
-      - name: "roc_curve / roc_auc_score / auc"
-        purpose: "Cálculo da curva ROC comparativa (binária) e ROC Macro-Average com label_binarize (multiclasse)."
+        purpose: "Média harmônica balanceada entre Precisão e Recall."
+      - name: "roc_curve / auc"
+        purpose: "Curvas ROC com cálculo de AUC para classificação binária e ROC Macro-Average binarizada para multiclasse."
       - name: "confusion_matrix"
-        purpose: "Geração de matrizes de confusão normalizadas."
+        purpose: "Matrizes de confusão com normalização proporcional por classe verdadeira."
       - name: "classification_report"
-        purpose: "Relatório detalhado de métricas por classe impresso no console."
+        purpose: "Relatório de métricas por classe impresso no terminal."
+    plots_generated:
+      - path: "./results/metrics_comparison_{mode}.png"
+        description: "Gráfico de barras agrupadas comparando Acurácia, Precisão, Recall e F1-Score com escala percentual (0-120%), rótulos a 45° e legenda externa."
+      - path: "./results/confusion_matrices_{mode}.png"
+        description: "Grid horizontal de subplots com matrizes de confusão normalizadas e rótulos nominais ('Benigno'/'Maligno' no modo binário)."
+      - path: "./results/roc_curves_{mode}.png"
+        description: "Curvas ROC de todos os modelos avaliados com painel de zoom (inset plot) no canto superior esquerdo para modo binário."
+      - path: "./results/roc_curves_macro_{mode}.png"
+        description: "Curva ROC Macro-Average com painel de zoom para modo multiclasse."
+      - path: "./results/latency_vs_f1_{mode}.png"
+        description: "Scatter plot de latência de inferência (ms por 1.000 amostras) versus F1-Score com anotações de cada modelo."
+      - path: "./results/svm_feature_weights_{mode}.png"
+        description: "Gráfico horizontal dos Top 25 coeficientes do LinearSVC (vermelho para tendência a ataque, azul para tendência benigna em binário; heatmap em multiclasse)."
+
+edge_deployment:
+  target_platform: "Raspberry Pi (3B+, 4B, 5, Zero 2 W) / Debian Linux"
+  directory: "raspberry_pi/"
+  libraries:
+    - name: "scapy"
+      version: ">=2.5.0"
+      purpose: "Sniffing e dissecação de pacotes brutos de rede IPv4 TCP/UDP em tempo real e leitura streaming de arquivos PCAP."
+    - name: "psutil"
+      version: ">=5.9.0"
+      purpose: "Monitoramento em tempo real do uso de CPU e consumo de memória RAM do Raspberry Pi."
+    - name: "smtplib / email.mime"
+      purpose: "Envio de alertas de intrusão autenticados e seguros via SMTP (TLS/SSL) em background assíncrono com proteção anti-flood/cooldown."
+  service_management:
+    tool: "systemd"
+    unit_file: "raspberry_pi/aids-rpi.service"
+    security_capabilities:
+      - "CAP_NET_RAW"
+      - "CAP_NET_ADMIN"
+    purpose: "Execução contínua como daemon no boot do Raspberry Pi com privilégios mínimos de rede sem necessidade de root."
 
