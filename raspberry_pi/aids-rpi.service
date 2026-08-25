@@ -1,0 +1,42 @@
+[Unit]
+Description=AIDS-RPi: Autonomous Intrusion Detection System for Raspberry Pi
+Documentation=https://github.com/your-org/AIDS
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/AIDS
+EnvironmentFile=/home/pi/AIDS/.env
+
+# Execução com Python no ambiente virtual
+ExecStart=/home/pi/AIDS/.venv/bin/python /home/pi/AIDS/rpi_monitor.py
+
+# Permissões de rede seguras sem precisar rodar como root
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+
+# Políticas de reinício automático
+Restart=on-failure
+RestartSec=5s
+
+# Limites de recursos adequados para Raspberry Pi
+CPUQuota=150%
+MemoryMax=800M
+MemoryHigh=650M
+
+# Isolamento e Segurança do Sistema de Arquivos
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/pi/AIDS/logs
+PrivateTmp=true
+
+# Logs integrados ao journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aids-rpi
+
+[Install]
+WantedBy=multi-user.target
