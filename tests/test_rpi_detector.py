@@ -213,11 +213,35 @@ class TestEmailAlertManager(unittest.TestCase):
         mock_server.quit.assert_called_once()
 
 
+def _create_mock_binary_pipeline():
+    mock_clf = MagicMock()
+    mock_clf.classes_ = np.array([0, 1])
+    mock_pipeline = MagicMock()
+    mock_pipeline.named_steps = {'classifier': mock_clf}
+    mock_pipeline.predict_proba.return_value = np.array([[0.1, 0.9]])
+    return mock_pipeline
+
+
+def _create_mock_multiclass_pipeline():
+    classes = ['Benign', 'Analysis', 'Backdoor', 'DoS', 'Exploits', 'Fuzzers', 'Generic', 'Reconnaissance', 'Shellcode', 'Worms']
+    mock_clf = MagicMock()
+    mock_clf.classes_ = np.array(classes)
+    mock_pipeline = MagicMock()
+    mock_pipeline.named_steps = {'classifier': mock_clf}
+    probs = np.array([0.01, 0.01, 0.01, 0.01, 0.95, 0.00, 0.00, 0.00, 0.00, 0.01])
+    mock_pipeline.predict_proba.return_value = np.array([probs])
+    return mock_pipeline
+
+
 class TestRPIDetector(unittest.TestCase):
     """Tests for the RPi detector engine and model inference."""
 
-    def test_binary_detection_pipeline(self):
+    @patch.object(RPIDetector, '_load_pipeline')
+    @patch.object(RPIDetector, '_resolve_model_path', return_value="models/stacking_pipeline_binary.joblib")
+    def test_binary_detection_pipeline(self, mock_resolve, mock_load):
         """Tests binary intrusion detection against trained pipeline."""
+        mock_load.return_value = _create_mock_binary_pipeline()
+
         email_manager = EmailAlertManager(enabled=False)
         detector = RPIDetector(
             mode="binary",
@@ -240,8 +264,12 @@ class TestRPIDetector(unittest.TestCase):
         self.assertGreaterEqual(result['probability'], 0.0)
         self.assertLessEqual(result['probability'], 1.0)
 
-    def test_multiclass_detection_pipeline(self):
+    @patch.object(RPIDetector, '_load_pipeline')
+    @patch.object(RPIDetector, '_resolve_model_path', return_value="models/stacking_pipeline_multiclass.joblib")
+    def test_multiclass_detection_pipeline(self, mock_resolve, mock_load):
         """Tests multiclass intrusion detection against trained pipeline."""
+        mock_load.return_value = _create_mock_multiclass_pipeline()
+
         email_manager = EmailAlertManager(enabled=False)
         detector = RPIDetector(
             mode="multiclass",
@@ -262,8 +290,12 @@ class TestRPIDetector(unittest.TestCase):
             'Benign', 'Analysis', 'Backdoor', 'DoS', 'Exploits', 'Fuzzers', 'Generic', 'Reconnaissance', 'Shellcode', 'Worms'
         ])
 
-    def test_detector_packet_stream(self):
+    @patch.object(RPIDetector, '_load_pipeline')
+    @patch.object(RPIDetector, '_resolve_model_path', return_value="models/stacking_pipeline_binary.joblib")
+    def test_detector_packet_stream(self, mock_resolve, mock_load):
         """Simulates full packet stream ingestion and evaluation."""
+        mock_load.return_value = _create_mock_binary_pipeline()
+
         email_manager = MagicMock()
         detector = RPIDetector(
             mode="binary",
@@ -288,3 +320,4 @@ class TestRPIDetector(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
