@@ -1,10 +1,15 @@
 import os
+import gc
 import joblib
 from dotenv import load_dotenv
 from sklearn.model_selection import train_test_split
 from src.data_loader import load_data, prepare_target
 from src.preprocessing import drop_irrelevant_features, get_preprocessor
-from src.models import get_base_learners, get_stacking_classifier
+from src.models import (
+    get_base_learners,
+    get_stacking_classifier,
+    get_stacking_weights_summary
+)
 from src.evaluation import evaluate_models
 from sklearn.pipeline import Pipeline
 import numpy as np
@@ -25,11 +30,18 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
     train_hgb = os.getenv('TRAIN_HGB', 'False').strip().lower() == 'true'
     train_mlp = os.getenv('TRAIN_MLP', 'True').strip().lower() == 'true'
     train_stacking = os.getenv('TRAIN_STACKING', 'True').strip().lower() == 'true'
+    stacking_profile = os.getenv('STACKING_PROFILE', 'edge').strip().lower()
+    stacking_cv_splits = int(os.getenv('STACKING_CV_SPLITS', '5'))
+    stacking_passthrough = os.getenv('STACKING_PASSTHROUGH', 'False').strip().lower() == 'true'
+    stacking_n_jobs_str = os.getenv('STACKING_N_JOBS', '').strip()
+    stacking_n_jobs = int(stacking_n_jobs_str) if stacking_n_jobs_str else min(2, os.cpu_count() or 1)
         
     # 1. Carregar e Preparar Dados
     df = load_data('data/CICFlowMeter_out.csv', sample_frac=sample_frac)
     df = drop_irrelevant_features(df)
     X, y = prepare_target(df, mode=target_mode)
+    del df
+    gc.collect()
     
     categorical_features = []
     if 'Protocol' in X.columns:
@@ -41,6 +53,8 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
     # 2. Split Treino/Teste
     print("\nDividindo conjunto de treino e teste...")
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    del X
+    gc.collect()
     
     # Determina se há algum treinamento a ser feito
     any_training = train_linearsvc or train_dt or train_rf or train_et or train_hgb or train_mlp or train_stacking
@@ -56,12 +70,17 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
         os.makedirs('models', exist_ok=True)
         joblib.dump(preprocessor, f'models/scaler_{target_mode}.joblib')
         print(f"Pré-processador salvo em models/scaler_{target_mode}.joblib")
+        
+        del X_train, X_test
+        gc.collect()
     else:
         print("\nCarregando Pré-processador existente (nenhum treinamento habilitado)...")
         preprocessor_path = f'models/scaler_{target_mode}.joblib'
         if os.path.exists(preprocessor_path):
             preprocessor = joblib.load(preprocessor_path)
             X_test_prep = preprocessor.transform(X_test)
+            del X_train, X_test
+            gc.collect()
         else:
             print(f"Erro: {preprocessor_path} não encontrado. Treine pelo menos um modelo primeiro.")
             return
@@ -158,8 +177,14 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
             
     # 5. Treinamento ou Carregamento do Stacking Ensemble
     if train_stacking:
-        print("\nTreinando Stacking Ensemble (isso pode demorar devido ao CV)...")
-        stacking_clf = get_stacking_classifier(random_state=42)
+        print(f"\nTreinando Stacking Ensemble (Perfil: {stacking_profile.upper()}, CV Splits: {stacking_cv_splits}, Passthrough: {stacking_passthrough}, N_Jobs: {stacking_n_jobs})...")
+        stacking_clf = get_stacking_classifier(
+            random_state=42,
+            profile=stacking_profile,
+            cv_splits=stacking_cv_splits,
+            passthrough=stacking_passthrough,
+            n_jobs=stacking_n_jobs
+        )
         stacking_clf.fit(X_train_prep, y_train)
         models_dict['Stacking'] = stacking_clf
         
@@ -173,6 +198,16 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
         joblib.dump(stacking_pipeline, f'models/stacking_pipeline_{target_mode}.joblib')
         joblib.dump(stacking_clf.final_estimator_, f'models/meta_learner_{target_mode}.joblib')
         print(f"Stacking Ensemble e artefatos treinados e salvos com sucesso em ./models/")
+        
+        # Resumo explicativo dos pesos do Meta-Learner
+        weights_summary = get_stacking_weights_summary(stacking_clf)
+        if weights_summary and 'estimators' in weights_summary:
+            print("\n" + "-"*40)
+            print("PESOS APRENDIDOS PELO META-LEARNER (Logistic Regression):")
+            print(f"Estimadores Base: {weights_summary['estimators']}")
+            print(f"Coeficientes: {weights_summary['coefficients']}")
+            print(f"Intercepto: {weights_summary['intercept']}")
+            print("-" * 40 + "\n")
     else:
         path = f'models/Stacking_{target_mode}.joblib'
         if os.path.exists(path):

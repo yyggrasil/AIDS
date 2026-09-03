@@ -1,9 +1,11 @@
+import gc
 import pandas as pd
 import numpy as np
 
 def load_data(file_path: str, sample_frac: float = 1.0, random_state: int = 42) -> pd.DataFrame:
     """
     Carrega os dados de tráfego de rede e aplica amostragem estratificada, se solicitado.
+    Otimizado para baixo consumo de memória RAM e prevenção de OOM.
     """
     print(f"Carregando dados de {file_path}...")
     # Lendo o CSV
@@ -12,16 +14,26 @@ def load_data(file_path: str, sample_frac: float = 1.0, random_state: int = 42) 
     # Removendo espaços em branco dos nomes das colunas
     df.columns = df.columns.str.strip()
     
+    # Otimização de tipos: converte colunas numéricas para float32 logo após a leitura,
+    # reduzindo o uso de memória em 50% antes das operações pesadas
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    if len(numeric_cols) > 0:
+        df[numeric_cols] = df[numeric_cols].astype(np.float32)
+
     # Removendo valores infinitos e NaN gerados por divisões por zero em métricas de fluxo
     print("Limpando valores nulos e infinitos...")
-    df.replace([np.inf, -np.inf], np.nan, inplace=True)
+    for col in numeric_cols:
+        col_vals = df[col].to_numpy()
+        inf_mask = np.isinf(col_vals)
+        if np.any(inf_mask):
+            df.loc[inf_mask, col] = np.nan
     df.dropna(inplace=True)
     
     # Removendo linhas duplicadas
     df.drop_duplicates(inplace=True)
     
     if sample_frac < 1.0:
-        print(f"Amostrando {sample_frac*100}% do dataset de forma estratificada pela coluna 'Label'...")
+        print(f"Amostrando {sample_frac*100:.1f}% do dataset de forma estratificada pela coluna 'Label'...")
         # Usa groupby para amostragem estratificada
         # Se alguma classe tiver menos amostras do que o necessário, pode dar erro no frac,
         # mas para o tamanho do dataset e 10%, deve ser tranquilo, a menos que existam classes raríssimas.
@@ -41,6 +53,7 @@ def load_data(file_path: str, sample_frac: float = 1.0, random_state: int = 42) 
                 print(f"Filtrando {len(rare_classes)} classe(s) com menos de 5 amostras para garantir estabilidade da validação cruzada...")
                 df = df[~df['Label'].isin(rare_classes)]
             
+    gc.collect()
     print(f"Shape final dos dados carregados: {df.shape}")
     return df
 

@@ -60,6 +60,10 @@ environment:
         type: "float"
         default: "0.1"
         description: "Fração de amostragem estratificada do dataset (ex: 0.01 = 1%, 0.1 = 10%, 1.0 = 100%)."
+      - name: "STACKING_N_JOBS"
+        type: "int"
+        default: "2"
+        description: "Número de workers concorrentes para a validação cruzada do Stacking (padrão 2 para evitar exaustão de memória/OOM no Linux)."
 
 core_libraries:
   data_manipulation:
@@ -141,6 +145,17 @@ machine_learning:
           random_state: 42
         purpose: "Árvore de decisão com critério de ganho de informação (entropia) e poda de complexidade de custo (ccp_alpha) para regras de decisão limpas."
 
+      - name: "HistGradientBoosting Classifier"
+        module: "sklearn.ensemble.HistGradientBoostingClassifier"
+        hyperparameters:
+          max_iter: 100
+          max_depth: 12
+          min_samples_leaf: 20
+          learning_rate: 0.1
+          class_weight: "balanced"
+          random_state: 42
+        purpose: "Ensemble de árvores com gradient boosting e binning de histograma para aprendizado rápido e modelagem não-linear de resíduos de erro."
+
       - name: "Mini Neural Network (MLPClassifier)"
         module: "sklearn.neural_network.MLPClassifier"
         hyperparameters:
@@ -163,24 +178,42 @@ machine_learning:
       module: "sklearn.linear_model.LogisticRegression"
       hyperparameters:
         C: 1.0
+        class_weight: "balanced"
         solver: "lbfgs"
         max_iter: 2000
         random_state: 42
-      purpose: "Meta-classificador de Nível 1 que aprende a ponderação regularizada ótima sobre as probabilidades preditas pelos estimadores base."
+      purpose: "Meta-classificador de Nível 1 que aprende a ponderação balanceada e regularizada ótima sobre as probabilidades preditas pelos estimadores base."
 
     stacking_ensemble:
       module: "sklearn.ensemble.StackingClassifier"
-      base_estimators:
-        - "linearsvcCalibrated"
-        - "rf"
-        - "et"
-        - "dt"
-      final_estimator: "LogisticRegression(C=1.0, solver='lbfgs', max_iter=2000, random_state=42)"
-      cross_validation: "StratifiedKFold(n_splits=3, shuffle=True, random_state=42)"
+      default_profile: "edge"
+      profiles:
+        edge:
+          - "linearsvcCalibrated"
+          - "hgb"
+          - "rf"
+        balanced:
+          - "linearsvcCalibrated"
+          - "rf"
+          - "et"
+          - "hgb"
+        performance:
+          - "linearsvcCalibrated"
+          - "rf"
+          - "et"
+          - "hgb"
+          - "mlp"
+        legacy:
+          - "linearsvcCalibrated"
+          - "rf"
+          - "et"
+          - "dt"
+      final_estimator: "LogisticRegression(C=1.0, class_weight='balanced', solver='lbfgs', max_iter=2000, random_state=42)"
+      cross_validation: "StratifiedKFold(n_splits=5, shuffle=True, random_state=42)"
       stack_method: "auto"
       passthrough: false
-      n_jobs: -1
-      purpose: "Combinação hierárquica em camadas dos 4 estimadores base com geração out-of-fold de meta-atributos sem vazamento de dados."
+      n_jobs: 2  # Configurável via STACKING_N_JOBS (default: 2 para proteção de memória)
+      purpose: "Combinação hierárquica em camadas dos estimadores base com calibração isotônica e geração out-of-fold de meta-atributos sem vazamento de dados."
 
 feature_engineering_and_preprocessing:
   pipeline_structure: "ColumnTransformer com Pipelines dedicados para variáveis numéricas e categóricas"

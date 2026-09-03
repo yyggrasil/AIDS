@@ -40,6 +40,7 @@ O comportamento do pipeline de treinamento e avaliação é controlado dinamicam
 - `RUN_BINARY` (bool, default `True`): Executa o pipeline no modo de classificação binária.
 - `RUN_MULTICLASS` (bool, default `False`): Executa o pipeline no modo de classificação multiclasse.
 - `SAMPLE_FRAC` (float, default `0.1`): Fração de amostragem estratificada do dataset (ex: `0.01` para 1%, `0.1` para 10%).
+- `STACKING_N_JOBS` (int, default `2`): Quantidade de processos simultâneos para validação cruzada do Stacking (padrão seguro 2 para evitar estouro de memória RAM e OOM killer no Linux).
 
 ---
 
@@ -50,40 +51,45 @@ O comportamento do pipeline de treinamento e avaliação é controlado dinamicam
 O Stacking combina múltiplos modelos de classificação (Base Learners - Nível 0) através de um meta-classificador (Meta Learner - Nível 1).
 
 - **Nível 0 (Base Learners / Modelos Suportados no Stacking):**
-  - **LinearSVC Calibrado (`CalibratedClassifierCV(LinearSVC(...), cv=3)`):** Modelo linear de alta velocidade com parâmetros `C=0.5`, `loss="squared_hinge"`, `dual="auto"`, `tol=1e-3`, `max_iter=5000` e `class_weight='balanced'`, empacotado para calibração de probabilidades de classe via validação cruzada tripla.
+  - **LinearSVC Calibrado (`CalibratedClassifierCV(LinearSVC(...), cv=3)`):** Modelo linear de alta velocidade com parâmetros `C=1.0`, `loss="squared_hinge"`, `dual="auto"`, `tol=1e-3`, `max_iter=5000` e `class_weight='balanced'`, empacotado para calibração de probabilidades de classe via validação cruzada tripla.
+  - **HistGradientBoosting Classifier (`HistGradientBoostingClassifier`):** Ensemble de árvores com gradient boosting e binning de histograma configurado com `max_iter=100`, `max_depth=12`, `min_samples_leaf=20`, `learning_rate=0.1`, `class_weight='balanced'` e `random_state=42`. Foca iterativamente nos resíduos de predição, complementando o bagging de forma ortogonal.
   - **Random Forest Classifier (`RandomForestClassifier`):** Ensemble por bagging configurado com `n_estimators=100`, `max_depth=15`, `min_samples_split=4`, `min_samples_leaf=2`, `max_features='sqrt'`, `class_weight='balanced'`, `n_jobs=1` e `random_state=42`.
   - **Extra Trees Classifier (`ExtraTreesClassifier`):** Ensemble de árvores extremamente aleatórias configurado com `n_estimators=100`, `max_depth=15`, `min_samples_split=4`, `min_samples_leaf=2`, `max_features='sqrt'`, `class_weight='balanced'`, `n_jobs=1` e `random_state=42`.
-  - **Decision Tree Classifier (`DecisionTreeClassifier`):** Árvore de decisão individual configurada com `criterion='entropy'`, `max_depth=15`, `min_samples_split=5`, `min_samples_leaf=2`, poda `ccp_alpha=0.0001`, `class_weight='balanced'` e `random_state=42`.
-  - **Mini Rede Neural (`MLPClassifier`):** Perceptron Multicamadas compacto de 2 camadas ocultas `(64, 32)`, ativação ReLU, otimizador Adam, regularização L2 (`alpha=0.0001`), `learning_rate='adaptive'`, `early_stopping=True` para convergência rápida e benchmark não-linear direto.
+  - **Decision Tree Classifier (`DecisionTreeClassifier`):** Árvore de decisão individual configurada com `criterion='entropy'`, `max_depth=15`, `min_samples_split=5`, `min_samples_leaf=2`, poda `ccp_alpha=0.0001`, `class_weight='balanced'` e `random_state=42` (suportada no perfil legacy).
+  - **Mini Rede Neural (`MLPClassifier`):** Perceptron Multicamadas compacto de 2 camadas ocultas `(64, 32)`, ativação ReLU, otimizador Adam, regularização L2 (`alpha=0.0001`), `learning_rate='adaptive'`, `early_stopping=True` para convergência rápida e benchmark não-linear direto (suportada no perfil performance).
+
+- **Perfis de Stacking Suportados (`STACKING_PROFILE`):**
+  - `edge` (Padrão otimizado para Raspberry Pi): Combina `linearsvcCalibrated`, `hgb` e `rf`. Baixíssima latência de inferência em borda sem perda de acurácia.
+  - `balanced`: Combina `linearsvcCalibrated`, `rf`, `et` e `hgb`.
+  - `performance`: Combina `linearsvcCalibrated`, `rf`, `et`, `hgb` e `mlp`.
+  - `legacy`: Combina `linearsvcCalibrated`, `rf`, `et` e `dt`.
+
 - **Nível 1 (Meta-Learner):**
-  - **Regressão Logística (`LogisticRegression`):** Configurada com `C=1.0`, `solver='lbfgs'`, `max_iter=2000` e `random_state=42`. Opera sobre probabilidades preditas na faixa `[0, 1]` geradas pelos estimadores de Nível 0.
+  - **Regressão Logística (`LogisticRegression`):** Configurada com `C=1.0`, `class_weight='balanced'`, `solver='lbfgs'`, `max_iter=2000` e `random_state=42`. Opera sobre probabilidades preditas na faixa `[0, 1]` geradas pelos estimadores de Nível 0.
 - **Estratégia de Validação do Stacking:**
-  - `StratifiedKFold(n_splits=3, shuffle=True, random_state=42)` com `stack_method='auto'`, `passthrough=False` e `n_jobs=-1`.
+  - `StratifiedKFold(n_splits=5, shuffle=True, random_state=42)` (configurável via `STACKING_CV_SPLITS`) com `stack_method='auto'`, `passthrough=False` e `n_jobs` controlado dinamicamente via `STACKING_N_JOBS` (padrão `2`).
 
 ```mermaid
 flowchart TD
     A[Dados de Tráfego de Rede - CICFlowMeter_out.csv] --> B[Remoção de Inf/NaN & Duplicados]
     B --> C[Amostragem Estratificada por SAMPLE_FRAC & Filtro de Classes Raras <5]
     C --> D[Remoção de Colunas Identificadoras & Constantes & Conversão float32]
-    D --> E[ColumnTransformer: Imputer + VarianceThreshold + RobustScaler / OneHotEncoder float32]
+    D --> E[ColumnTransformer: Imputer + VarianceThreshold + Scaler / OneHotEncoder]
 
-    subgraph Nível 0 - Base Learners
+    subgraph Nível 0 - Base Learners (Perfil Edge)
         E --> F[LinearSVC Calibrado - CalibratedClassifierCV cv=3]
-        E --> G[Random Forest Classifier - 100 estimadores]
-        E --> H[Extra Trees Classifier - 100 estimadores]
-        E --> I[Decision Tree Classifier - Entropia + CCP Alpha]
+        E --> G[HistGradientBoosting - Boosting por Histograma]
+        E --> H[Random Forest Classifier - Bagging 100 estimadores]
     end
 
     F --> J[Probabilidades Calibradas LinearSVC]
-    G --> K[Probabilidades Random Forest]
-    H --> L[Probabilidades Extra Trees]
-    I --> M[Probabilidades Decision Tree]
+    G --> K[Probabilidades HistGradientBoosting]
+    H --> L[Probabilidades Random Forest]
 
     subgraph Nível 1 - Meta Learner
-        J --> N[Meta-Classificador - Regressão Logística C=1.0]
+        J --> N["Meta-Classificador - Regressão Logística (class_weight='balanced')"]
         K --> N
         L --> N
-        M --> N
     end
 
     N --> O{Classificação Final}

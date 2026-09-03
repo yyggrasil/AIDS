@@ -2,7 +2,7 @@
 
 Este projeto consiste em um Sistema de Detecção de Intrusão Baseado em Anomalias e Assinaturas (**AIDS - Anomaly-based Intrusion Detection System**). O objetivo principal é classificar pacotes e fluxos de tráfego de rede entre **Maligno** (ataques como DoS/DDoS, Port Scan, Botnet, Brute Force, etc.) e **Benigno** (tráfego legítimo de rede).
 
-A solução emprega um algoritmo de **Stacking Ensemble (Aprendizado em Camadas)** otimizado com validação cruzada estratificada, combinando as capacidades complementares do **LinearSVC** (alta velocidade linear), **Random Forest (RF)** (redução de variância), **Extra Trees (ET)** (fronteiras suaves) e **Decision Tree (DT)** (regras ortogonais), utilizando uma **Regressão Logística** como meta-classificador.
+A solução emprega um algoritmo de **Stacking Ensemble (Aprendizado em Camadas)** otimizado com validação cruzada estratificada em 5 folds e calibração isotônica, combinando as capacidades complementares do **LinearSVC Calibrado** (separação linear de alta velocidade com probabilidades reais), **HistGradientBoosting (HGB)** (boosting rápido por histograma para resíduos de erro), **Random Forest (RF)** (redução de variância por bagging) e **Extra Trees (ET)** (fronteiras suaves), utilizando uma **Regressão Logística Balanceada** como meta-classificador de Nível 1. Suporta perfis pré-configurados (`edge` para Raspberry Pi, `balanced`, `performance` com redes neurais, e `legacy`).
 
 ## Estrutura do Projeto
 
@@ -93,17 +93,26 @@ Abra o arquivo `.env` para ligar ou desligar os algoritmos e modos de teste dese
 TRAIN_LINEARSVC=True
 TRAIN_DT=True
 TRAIN_RF=True
+TRAIN_ET=False
+TRAIN_HGB=False
 TRAIN_MLP=True
 
 # Treinar o Stacking Ensemble?
 TRAIN_STACKING=True
+# Perfis do Stacking: edge (padrão RPi), balanced, performance, legacy
+STACKING_PROFILE=edge
+# Splits para StratifiedKFold out-of-fold (padrão: 5)
+STACKING_CV_SPLITS=5
+STACKING_PASSTHROUGH=False
+# Paralelismo no Stacking (padrão 2 para evitar estouro de memória/OOM no Linux)
+STACKING_N_JOBS=2
 
 # Modos de Treinamento a executar no main.py
 RUN_BINARY=True
 RUN_MULTICLASS=False
 
 # Fração de amostragem do dataset (0.01 = 1%, 0.1 = 10%, 1.0 = 100%)
-SAMPLE_FRAC=0.01
+SAMPLE_FRAC=0.1
 ```
 
 ## Executando o Treinamento do Modelo
