@@ -386,9 +386,17 @@ class FlowAggregator:
         # Check for IP layer (supports Ethernet, SLL, Loopback, Raw IP)
         if not (hasattr(packet, 'haslayer') and packet.haslayer(IP)):
             try:
-                packet = IP(bytes(packet))
+                from scapy.layers.l2 import Ether
+                ether_pkt = Ether(bytes(packet))
+                if hasattr(ether_pkt, 'haslayer') and ether_pkt.haslayer(IP):
+                    packet = ether_pkt
             except Exception:
-                return None
+                pass
+            if not (hasattr(packet, 'haslayer') and packet.haslayer(IP)):
+                try:
+                    packet = IP(bytes(packet))
+                except Exception:
+                    return None
             if not (hasattr(packet, 'haslayer') and packet.haslayer(IP)):
                 return None
 

@@ -242,3 +242,32 @@ flowchart TD
     end
 ```
 
+---
+
+### 7.2. Configuração de Rede: Raspberry Pi como Gateway Padrão (Método 1)
+
+Para garantir que a engine de detecção (`RPIDetector`) analise **todo o tráfego da rede doméstica**, o Raspberry Pi é configurado como o **Gateway Padrão (Default Gateway)** da rede LAN:
+
+1. **IP Estático no Raspberry Pi:**
+   - Atribuição de um IP estático na interface de rede (ex: `192.168.1.2/24` na `eth0` ou `wlan0`).
+
+2. **Habilitação do Encaminhamento de IP (IP Forwarding):**
+   ```bash
+   sudo sysctl -w net.ipv4.ip_forward=1
+   # Para persistência em /etc/sysctl.conf:
+   # net.ipv4.ip_forward=1
+   ```
+
+3. **Configuração de NAT / Masquerade via iptables:**
+   - Permite que o Raspberry Pi roteie pacotes da LAN para a Internet:
+   ```bash
+   sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+   sudo iptables -A FORWARD -i eth0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+   sudo iptables -A FORWARD -j ACCEPT
+   ```
+
+4. **Ajuste do Servidor DHCP no Roteador Principal:**
+   - Alteração do campo **Default Gateway** (Gateway Padrão) nas configurações DHCP do roteador doméstico para o IP do Raspberry Pi (`192.168.1.2`).
+   - Com essa alteração, todo o tráfego gerado pelos dispositivos da casa é direcionado ao Raspberry Pi antes de sair para a internet, permitindo inspeção em tempo real e extração de fluxos pelo `Scapy` e `FlowAggregator`.
+
+

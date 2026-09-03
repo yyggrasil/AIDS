@@ -231,3 +231,23 @@ Para rodar todos os testes unitários do sistema no Raspberry Pi:
 ```bash
 python3 -m unittest discover tests
 ```
+
+---
+
+## 🌐 10. Configuração de Roteamento da Rede Doméstica (Método 1 - Gateway Padrão)
+
+Para que todo o tráfego da rede doméstica passe pelo Raspberry Pi antes de sair para a internet:
+
+1. **Fixar IP Estático no Raspberry Pi** (ex: `192.168.1.2`).
+2. **Habilitar IP Forwarding:**
+   ```bash
+   sudo sysctl -w net.ipv4.ip_forward=1
+   ```
+3. **Configurar NAT no Raspberry Pi:**
+   ```bash
+   sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+   sudo iptables -A FORWARD -i eth0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+   sudo iptables -A FORWARD -j ACCEPT
+   ```
+4. **Atualizar Roteador Doméstico:** No servidor DHCP do seu roteador Wi-Fi, altere o **Default Gateway** para o IP do Raspberry Pi (`192.168.1.2`).
+
