@@ -4,12 +4,22 @@ Provides live packet capturing, flow aggregation, ML model inference,
 and automated email alerting with anti-flood mechanisms.
 """
 
+from .config import load_rpi_env
 from .flow_aggregator import FlowAggregator, Flow, FEATURE_NAMES
 from .email_alert import EmailAlertManager
 from .detection_logger import DetectionLogger
 from .rpi_detector import RPIDetector
 
-__all__ = ["FlowAggregator", "Flow", "FEATURE_NAMES", "EmailAlertManager", "DetectionLogger", "RPIDetector"]
+__all__ = [
+    "load_rpi_env",
+    "FlowAggregator",
+    "Flow",
+    "FEATURE_NAMES",
+    "EmailAlertManager",
+    "DetectionLogger",
+    "RPIDetector"
+]
+
 
 
 

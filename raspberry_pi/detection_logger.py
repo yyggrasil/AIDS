@@ -13,10 +13,19 @@ import socket
 import logging
 import threading
 from datetime import datetime
-from dotenv import load_dotenv
+try:
+    from .config import load_rpi_env
+    load_rpi_env()
+except (ImportError, ValueError):
+    try:
+        from config import load_rpi_env
+        load_rpi_env()
+    except (ImportError, ValueError):
+        from dotenv import load_dotenv
+        load_dotenv()
 
-load_dotenv()
 logger = logging.getLogger("AIDS.DetectionLogger")
+
 
 
 

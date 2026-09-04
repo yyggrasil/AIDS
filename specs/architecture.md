@@ -224,12 +224,23 @@ Para execução autônoma diretamente em dispositivos Edge / SBCs (*Raspberry Pi
    - Template duplo (HTML responsivo moderno + Texto Puro) contendo IPs, portas, probabilidade do ataque, estatísticas de tráfego e comandos de firewall recomendados (`iptables`).
    - Mecanismo de **Cooldown / Throttling** configurável (padrão: 60s) para supressão e agregação de rajadas de alertas durante ataques volumosos (DDoS / Port Scan).
 
-3. **Motor Edge e CLI (`raspberry_pi/rpi_detector.py` / `raspberry_pi/rpi_monitor.py` / `rpi_monitor.py`):**
-   - Suporte a captura ao vivo (`--interface eth0`), modo simulação (`--dry-run`), replay de arquivos PCAP (`--pcap arquivo.pcap`) e teste de diagnóstico SMTP (`--test-email`).
+3. **Sistema de Log de Detecções e Auditoria (`raspberry_pi/detection_logger.py`):**
+   - Gravação persistente e thread-safe de intrusões e pacotes detectados.
+   - Suporte a múltiplos formatos: **JSON Lines (`jsonl`)**, **CSV (`csv`)** e **Texto (`text`)**, com opção simultânea (`all`).
+   - Mecanismo de **rotação automática de arquivos por tamanho (`RotatingFileHandler`)** com limite em bytes e retenção de backups para preservar o cartão SD do Raspberry Pi.
+   - Registro detalhado incluindo 5-tupla, estatísticas de pacotes (mínimo, máximo, média, flags TCP), métricas do fluxo, taxas de transmissão, confiança do modelo e regra de mitigação `iptables`.
+   - Filtro configurável: apenas intrusões detectadas (padrão) ou todos os fluxos avaliados (`DETECTION_LOG_ALL_FLOWS`).
 
-4. **Serviço de Inicialização Automática no Boot (`raspberry_pi/aids-rpi.service`):**
+4. **Motor Edge e CLI (`raspberry_pi/rpi_detector.py` / `raspberry_pi/rpi_monitor.py` / `rpi_monitor.py`):**
+   - Suporte a captura ao vivo (`--interface eth0`), modo simulação (`--dry-run`), replay de arquivos PCAP (`--pcap arquivo.pcap`), teste SMTP (`--test-email`) e customização de logs (`--detection-log`, `--detection-log-format`, `--log-all-flows`).
+
+5. **Serviço de Inicialização Automática no Boot (`raspberry_pi/aids-rpi.service`):**
    - Arquivo unit `systemd` para inicialização automática no boot do Raspberry Pi.
    - Execução com privilégios mínimos via Linux Capabilities (`CAP_NET_RAW`, `CAP_NET_ADMIN`).
+
+6. **Configuração Isolada no Edge (`raspberry_pi/.env` / `raspberry_pi/config.py`):**
+   - Separação completa de configurações: o arquivo `.env` na raiz controla exclusivamente o treinamento de Machine Learning (`main.py`), enquanto `raspberry_pi/.env` controla a captura, inferência, alertas SMTP e rotação de logs no Raspberry Pi 3.
+
 
 ```mermaid
 flowchart TD
@@ -239,8 +250,16 @@ flowchart TD
         Agg --> Pre[ColumnTransformer: Log1p + StandardScaler]
         Pre --> Stack[Stacking Pipeline Classifier]
         Stack --> Decision{Probabilidade Maligna >= 0.50?}
-        Decision -->|Sim| AlertMgr[EmailAlertManager]
-        Decision -->|Não| Discard[Log / Descarte]
+        
+        Decision -->|Sim| AlertFork[Disparo de Resposta a Incidentes]
+        Decision -->|Não / Benigno| DiscardCheck{Log All Flows Ativo?}
+        DiscardCheck -->|Sim| DetLog
+        DiscardCheck -->|Não| Discard[Descarte Normal]
+
+        AlertFork --> DetLog[DetectionLogger - JSONL / CSV / TEXT]
+        DetLog --> Rot[Rotação Automática de Arquivos em Disco]
+        
+        AlertFork --> AlertMgr[EmailAlertManager]
         AlertMgr --> Throttling{Cooldown Ativo?}
         Throttling -->|Sim| Suppress[Agregação de Contador]
         Throttling -->|Não| SMTP[SMTP TLS/SSL - Disparo Assíncrono]

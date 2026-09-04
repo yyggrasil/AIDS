@@ -29,14 +29,15 @@ Este guia fornece as instruções completas, passo a passo, para implantar e exe
                  - Meta-Learner: Regressão Logística
                                  │
                                  ▼
-                    [Maligno? Probabilidade >= 0.50]
-                     /                            \
-                   SIM                            NÃO
-                   /                                \
-  [Email Alert Manager]                        [Descarte / Log]
-  - Throttling & Cooldown (Anti-Flood)
-  - Notificação HTML + Texto via TLS/SSL
-  - Disparo Assíncrono Não-Bloqueante
+                     [Maligno? Probabilidade >= 0.50]
+                      /                            \
+                    SIM                            NÃO
+                   /   \                             \
+                  /     \                             \
+  [Email Alert Manager]  [Detection Logger]      [Descarte / Log]
+  - Throttling/Cooldown  - JSONL / CSV / Text
+  - Disparo Assíncrono   - Rotação Automática
+  - HTML + Texto Puro    - Auditoria Forense / SIEM
 ```
 
 ---
@@ -97,16 +98,21 @@ getcap "$PYTHON_PATH"
 
 ---
 
-## ⚙️ 4. Configuração das Variáveis de Ambiente (`.env`)
+## ⚙️ 4. Configuração das Variáveis de Ambiente no Raspberry Pi 3 (`raspberry_pi/.env`)
 
-Copie o arquivo de exemplo `.env-example` para `.env` e configure suas preferências:
+O projeto utiliza **dois arquivos de configuração isolados**:
+- **Raiz do projeto (`.env`)**: configura exclusivamente o treinamento dos modelos de Machine Learning (`main.py`).
+- **Pasta `raspberry_pi/.env`**: configura exclusivamente o monitoramento em tempo real, engine de detecção, alertas SMTP e logs no Raspberry Pi 3.
+
+Para configurar no Raspberry Pi 3, copie o arquivo de exemplo dedicado dentro de `raspberry_pi/`:
 
 ```bash
+cd raspberry_pi
 cp .env-example .env
 nano .env
 ```
 
-### Exemplo de Configuração para Raspberry Pi com Alertas Gmail:
+### Exemplo de Configuração para Raspberry Pi 3 (`raspberry_pi/.env`):
 
 ```ini
 # --- Configuração de Rede no Raspberry Pi ---
@@ -130,6 +136,14 @@ ALERT_RECIPIENT=soc@empresa.com,admin@empresa.com
 
 # --- Proteção Anti-Flood / Cooldown ---
 COOLDOWN_SECONDS=60.0           # Intervalo mínimo entre e-mails do mesmo IP
+
+# --- Log de Pacotes e Intrusões Detectadas (Audit Trail) ---
+DETECTION_LOG_ENABLED=True      # Gravação persistente em arquivo
+DETECTION_LOG_FILE=logs/detections.jsonl # Caminho do arquivo de log
+DETECTION_LOG_FORMAT=jsonl      # jsonl (SIEM), csv (planilhas), text (syslog) ou all
+DETECTION_LOG_MAX_BYTES=10485760 # Rotação a cada 10 MB para poupar o cartão SD
+DETECTION_LOG_BACKUP_COUNT=5    # Manter até 5 arquivos rotacionados (.1, .2, ...)
+DETECTION_LOG_ALL_FLOWS=False   # True para logar todos os fluxos, False apenas ataques
 ```
 
 > 💡 **Nota para Gmail**: Utilize uma **Senha de Aplicativo (App Password)** de 16 caracteres gerada em *Conta Google > Segurança > Verificação em duas etapas > Senhas de app*.
@@ -151,18 +165,19 @@ Caso o e-mail seja recebido na caixa de entrada, a integração SMTP está pront
 ## 🚀 6. Execução Manual e Modos de Uso
 
 ### 6.1 Modo Detecção em Tempo Real na Interface Principal
+Inicia a captura, classifica com o modelo Stacking, envia alertas de e-mail e grava detecções em `logs/detections.jsonl`:
 ```bash
 python3 rpi_monitor.py --interface eth0 --mode binary
 ```
 
 ### 6.2 Modo Simulação / Teste Seguro (DRY-RUN)
-Executa a captura e inferência mas apenas imprime logs no console, sem enviar e-mails:
+Executa a captura e inferência, **grava todas as detecções no log persistente**, mas simula o envio de e-mails:
 ```bash
 python3 rpi_monitor.py --interface eth0 --dry-run
 ```
 
 ### 6.3 Modo Multiclasse (Identificação de Ataques Específicos)
-Identifica categorias como *DoS, Exploits, Reconnaissance, Fuzzers, Worms, etc.*:
+Identifica categorias como *DoS, Exploits, Reconnaissance, Fuzzers, Worms, etc.* e grava o tipo exato no log:
 ```bash
 python3 rpi_monitor.py --interface eth0 --mode multiclass
 ```
@@ -171,6 +186,23 @@ python3 rpi_monitor.py --interface eth0 --mode multiclass
 Reproduz um arquivo PCAP capturado previamente:
 ```bash
 python3 rpi_monitor.py --pcap data/sample_traffic.pcap --mode binary
+```
+
+### 6.5 Personalização do Log de Detecções (CSV / JSONL / Todos os Fluxos)
+Você pode escolher o formato e o arquivo de saída diretamente via linha de comando:
+
+```bash
+# Gravar em formato CSV (ideal para Excel, LibreOffice e Pandas):
+python3 rpi_monitor.py --interface eth0 --detection-log logs/detections.csv --detection-log-format csv
+
+# Gravar em ambos os formatos simultaneamente (JSONL + CSV):
+python3 rpi_monitor.py --interface eth0 --detection-log logs/detections.jsonl --detection-log-format all
+
+# Gravar todos os fluxos avaliados (benignos e ataques) para auditoria completa:
+python3 rpi_monitor.py --interface eth0 --log-all-flows
+
+# Desativar a gravação de logs em arquivo se necessário:
+python3 rpi_monitor.py --interface eth0 --no-detection-log
 ```
 
 ---

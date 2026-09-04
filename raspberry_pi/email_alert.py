@@ -13,10 +13,19 @@ import time
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from dotenv import load_dotenv
+try:
+    from .config import load_rpi_env
+    load_rpi_env()
+except (ImportError, ValueError):
+    try:
+        from config import load_rpi_env
+        load_rpi_env()
+    except (ImportError, ValueError):
+        from dotenv import load_dotenv
+        load_dotenv()
 
-load_dotenv()
 logger = logging.getLogger("AIDS.EmailAlert")
+
 
 
 class EmailAlertManager:

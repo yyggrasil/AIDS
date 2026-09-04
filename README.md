@@ -64,20 +64,24 @@ O projeto inclui uma solução de ponta a ponta pronta para rodar em **Raspberry
 - **Detecção com Stacking:** Executa inferência com o modelo Stacking de alta performance.
 - **Alertas por E-mail:** Envia e-mails automáticos (HTML/Texto) via SMTP TLS/SSL para a equipe de segurança quando ataques forem detectados.
 - **Proteção Anti-Flood:** Sistema de *cooldown* inteligente para evitar rajadas de e-mails em ataques volumosos (DDoS / PortScan).
+- **Sistema de Log de Detecções (Audit Trail):** Registro persistente e rotacionado em disco das intrusões e pacotes detectados nos formatos `jsonl` (SIEM), `csv` (planilhas) ou `text` (syslog), garantindo auditoria forense mesmo quando o envio de e-mails estiver em cooldown ou desativado.
 
 ### Como Executar no Raspberry Pi:
 
-Consulte o guia completo em [**`raspberry_pi/README.md`**](file:///home/yggdrasil/Work/AIDS_alternativo/raspberry_pi/README.md) ou inicie diretamente via CLI:
+Consulte o guia completo em [**`raspberry_pi/README.md`**](file:///D:/kaue/acesso%20rapido/Documentos/Projetos/AIDS_alternativo/raspberry_pi/README.md) ou inicie diretamente via CLI:
 
 ```bash
 # 1. Testar conexão SMTP e envio de alerta simulado:
 python rpi_monitor.py --test-email
 
-# 2. Iniciar monitoramento ao vivo na interface eth0:
+# 2. Iniciar monitoramento ao vivo na interface eth0 (grava logs em logs/detections.jsonl):
 python rpi_monitor.py --interface eth0 --mode binary
 
-# 3. Modo simulação (Dry-Run sem enviar e-mails reais):
+# 3. Modo simulação (Dry-Run sem e-mails reais, mantendo gravação no log de detecções):
 python rpi_monitor.py --interface eth0 --dry-run
+
+# 4. Gravar log em formato CSV ou salvar todos os fluxos:
+python rpi_monitor.py --interface eth0 --detection-log logs/detections.csv --detection-log-format csv
 ```
 
 ---

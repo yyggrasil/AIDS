@@ -16,13 +16,18 @@ import pandas as pd
 import numpy as np
 
 try:
+    from .config import load_rpi_env
     from .flow_aggregator import FlowAggregator, Flow
     from .email_alert import EmailAlertManager
     from .detection_logger import DetectionLogger
 except (ImportError, ValueError):
+    from config import load_rpi_env
     from flow_aggregator import FlowAggregator, Flow
     from email_alert import EmailAlertManager
     from detection_logger import DetectionLogger
+
+load_rpi_env()
+
 
 
 

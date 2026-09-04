@@ -20,16 +20,19 @@ import threading
 from dotenv import load_dotenv
 
 try:
+    from .config import load_rpi_env
     from .rpi_detector import RPIDetector
     from .email_alert import EmailAlertManager
     from .detection_logger import DetectionLogger
 except (ImportError, ValueError):
+    from config import load_rpi_env
     from rpi_detector import RPIDetector
     from email_alert import EmailAlertManager
     from detection_logger import DetectionLogger
 
-# Load environment configuration
-load_dotenv()
+# Load environment configuration for Raspberry Pi 3
+load_rpi_env()
+
 
 
 
