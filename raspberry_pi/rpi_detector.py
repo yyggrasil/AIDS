@@ -18,9 +18,14 @@ import numpy as np
 try:
     from .flow_aggregator import FlowAggregator, Flow
     from .email_alert import EmailAlertManager
+    from .detection_logger import DetectionLogger
 except (ImportError, ValueError):
     from flow_aggregator import FlowAggregator, Flow
     from email_alert import EmailAlertManager
+    from detection_logger import DetectionLogger
+
+
+
 
 logger = logging.getLogger("AIDS.RPIDetector")
 
@@ -40,7 +45,8 @@ class RPIDetector:
         active_timeout: float = 60.0,
         max_flows: int = 10000,
         dry_run: bool = False,
-        email_manager: EmailAlertManager = None
+        email_manager: EmailAlertManager = None,
+        detection_logger: DetectionLogger = None
     ):
         self.mode = mode.lower()
         self.interface = interface or os.getenv("NETWORK_INTERFACE", "eth0")
@@ -56,6 +62,9 @@ class RPIDetector:
 
         # Initialize Email Alert Manager
         self.email_manager = email_manager or EmailAlertManager(enabled=not dry_run)
+
+        # Initialize Detection Logger (Persistent Audit Trail)
+        self.detection_logger = detection_logger or DetectionLogger()
 
         # Load Stacking Model & Preprocessor Pipeline
         self.model_path = model_path or self._resolve_model_path()
@@ -206,6 +215,10 @@ class RPIDetector:
             else:
                 logger.info("[DRY-RUN] Alerta de e-mail simulado com sucesso.")
 
+        # Record to persistent detection log (JSONL/CSV/Text with rotation)
+        if self.detection_logger and (res['is_attack'] or self.detection_logger.log_all_flows):
+            self.detection_logger.log_detection(res, flow=flow, interface=self.interface)
+
         return res
 
     def flush_and_detect(self, current_time: float = None, force: bool = False) -> list:
@@ -318,6 +331,8 @@ class RPIDetector:
             agg_stats = self.aggregator.get_stats()
             mem = psutil.virtual_memory()
             cpu = psutil.cpu_percent(interval=None)
+            logged_count = self.detection_logger.total_logged if self.detection_logger else 0
+            log_path = self.detection_logger.log_file if self.detection_logger else None
             return {
                 'active_flows': agg_stats['active_flows'],
                 'total_packets_processed': agg_stats['total_packets_processed'],
@@ -326,6 +341,8 @@ class RPIDetector:
                 'attack_type_counts': dict(self.attack_type_counts),
                 'alerts_sent': self.email_manager.total_alerts_sent,
                 'alerts_suppressed': self.email_manager.total_alerts_suppressed,
+                'detections_logged': logged_count,
+                'detection_log_file': log_path,
                 'cpu_percent': cpu,
                 'ram_percent': mem.percent,
                 'ram_used_mb': round(mem.used / (1024 * 1024), 1)

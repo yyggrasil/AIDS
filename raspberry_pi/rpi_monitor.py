@@ -22,12 +22,16 @@ from dotenv import load_dotenv
 try:
     from .rpi_detector import RPIDetector
     from .email_alert import EmailAlertManager
+    from .detection_logger import DetectionLogger
 except (ImportError, ValueError):
     from rpi_detector import RPIDetector
     from email_alert import EmailAlertManager
+    from detection_logger import DetectionLogger
 
 # Load environment configuration
 load_dotenv()
+
+
 
 
 def setup_logging(log_file: str = None, verbose: bool = False):
@@ -69,15 +73,17 @@ def run_stats_reporter(detector: RPIDetector, interval: int, stop_event: threadi
     while not stop_event.wait(timeout=interval):
         stats = detector.get_stats()
         logging.info(
-            "📊 [STATUS] CPU: %.1f%% | RAM: %.1f%% (%s MB) | Fluxos Ativos: %d | Avaliados: %d | Ataques: %d | Alertas: %d",
+            "📊 [STATUS] CPU: %.1f%% | RAM: %.1f%% (%s MB) | Fluxos Ativos: %d | Avaliados: %d | Ataques: %d | Alertas: %d | Logs Gravados: %d",
             stats['cpu_percent'],
             stats['ram_percent'],
             stats['ram_used_mb'],
             stats['active_flows'],
             stats['total_flows_evaluated'],
             stats['total_attacks_detected'],
-            stats['alerts_sent']
+            stats['alerts_sent'],
+            stats.get('detections_logged', 0)
         )
+
 
 
 def main():
@@ -138,10 +144,34 @@ def main():
         help="Path to write log file"
     )
     parser.add_argument(
+        "--detection-log",
+        type=str,
+        default=os.getenv("DETECTION_LOG_FILE", "logs/detections.jsonl"),
+        help="Path to write security detection log file"
+    )
+    parser.add_argument(
+        "--detection-log-format",
+        choices=["jsonl", "csv", "text", "all"],
+        default=os.getenv("DETECTION_LOG_FORMAT", "jsonl").lower(),
+        help="Format for detection log (jsonl, csv, text, all)"
+    )
+    parser.add_argument(
+        "--log-all-flows",
+        action="store_true",
+        default=os.getenv("DETECTION_LOG_ALL_FLOWS", "False").strip().lower() == "true",
+        help="Log all evaluated flows, including benign traffic (default: only attacks)"
+    )
+    parser.add_argument(
+        "--no-detection-log",
+        action="store_true",
+        help="Disable persistent file logging for detected attacks/flows"
+    )
+    parser.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="Enable debug logging"
     )
+
 
     args = parser.parse_args()
     setup_logging(log_file=args.log_file, verbose=args.verbose)
@@ -184,6 +214,15 @@ def main():
         enabled=not args.dry_run
     )
 
+    # Initialize Detection Logger (Persistent Audit Trail)
+    detection_log_enabled = (not args.no_detection_log) and (os.getenv("DETECTION_LOG_ENABLED", "True").strip().lower() == "true")
+    detection_logger = DetectionLogger(
+        log_file=args.detection_log,
+        log_format=args.detection_log_format,
+        log_all_flows=args.log_all_flows,
+        enabled=detection_log_enabled
+    )
+
     # Initialize Edge Intrusion Detector
     try:
         detector = RPIDetector(
@@ -191,7 +230,8 @@ def main():
             interface=args.interface,
             threshold=args.threshold,
             dry_run=args.dry_run,
-            email_manager=email_manager
+            email_manager=email_manager,
+            detection_logger=detection_logger
         )
     except Exception as ex:
         logging.critical("❌ Falha ao inicializar o detector: %s", str(ex))
@@ -222,6 +262,12 @@ def main():
     logging.info("🚀 Iniciando serviço AIDS-RPi no Raspberry Pi...")
     logging.info("⚙️  Interface: %s | Modo: %s | Limiar: %.2f | Anti-Flood Cooldown: %ds",
                  args.interface, args.mode.upper(), args.threshold, int(args.cooldown))
+    if detection_logger.enabled:
+        logging.info("📝 Log de Detecções Ativo: %s (Formato: %s | Todos os Fluxos: %s)",
+                     detection_logger.log_file, detection_logger.log_format.upper(), detection_logger.log_all_flows)
+    else:
+        logging.info("📝 Log de Detecções em Arquivo Desabilitado.")
+
     if args.dry_run:
         logging.warning("⚠️  Modo DRY-RUN ativo. Alertas por e-mail NÃO serão enviados.")
 

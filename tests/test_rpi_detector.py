@@ -314,6 +314,8 @@ class TestRPIDetector(unittest.TestCase):
 
         stats = detector.get_stats()
         self.assertGreaterEqual(stats['total_flows_evaluated'], 1)
+        self.assertIn('detections_logged', stats)
+        self.assertGreaterEqual(stats['detections_logged'], 1)
         self.assertGreaterEqual(stats['cpu_percent'], 0.0)
         self.assertGreater(stats['ram_used_mb'], 0.0)
 
