@@ -103,6 +103,9 @@ if [ "$CURRENT_PROJECT_DIR" != "$TARGET_DIR" ]; then
     PROJECT_DIR="$TARGET_DIR"
     cd "$PROJECT_DIR"
 
+    # Remover .venv antigo herdado para forcar criacao limpa em /etc/aids
+    rm -rf "$TARGET_DIR/.venv"
+
     # Verificacao de seguranca antes de remover o diretorio de origem
     if [ "$ORIGIN_DIR" != "/" ] && [ "$ORIGIN_DIR" != "/etc" ] && [ "$ORIGIN_DIR" != "/home" ] && [ "$ORIGIN_DIR" != "/root" ]; then
         rm -rf "$ORIGIN_DIR"
@@ -167,13 +170,24 @@ success "Dependencias do sistema Linux instaladas com sucesso."
 info "[2/7] Configurando ambiente virtual Python (.venv)..."
 VENV_DIR="$PROJECT_DIR/.venv"
 
+# Validar se o venv existente e funcional neste caminho (/etc/aids)
+if [ -d "$VENV_DIR" ]; then
+    if [ ! -f "$VENV_DIR/bin/python3" ] || ! "$VENV_DIR/bin/python3" -c "import sys" 2>/dev/null; then
+        info "Ambiente virtual em $VENV_DIR herdado ou invalido. Recriando..."
+        rm -rf "$VENV_DIR"
+    fi
+fi
+
 if [ ! -d "$VENV_DIR" ]; then
-    info "Criando ambiente virtual em $VENV_DIR..."
+    info "Criando ambiente virtual limpo em $VENV_DIR..."
     sudo -u "$REAL_USER" python3 -m venv "$VENV_DIR"
 fi
 
-# Atualizar pip
-sudo -u "$REAL_USER" "$VENV_DIR/bin/pip" install --upgrade pip
+# Assegurar propriedade do venv para o usuario
+chown -R "$REAL_USER:$REAL_GROUP" "$VENV_DIR"
+
+# Atualizar pip diretamente pelo interpretador python (evita erro de shebang no bin/pip)
+sudo -u "$REAL_USER" "$VENV_DIR/bin/python3" -m pip install --upgrade pip
 
 # Instalar requisitos do modulo edge
 RPI_REQ="$PROJECT_DIR/raspberry_pi/requirements.txt"
@@ -181,13 +195,13 @@ ROOT_REQ="$PROJECT_DIR/requirements.txt"
 
 if [ -f "$RPI_REQ" ]; then
     info "Instalando bibliotecas otimizadas para Raspberry Pi ($RPI_REQ)..."
-    sudo -u "$REAL_USER" "$VENV_DIR/bin/pip" install -r "$RPI_REQ"
+    sudo -u "$REAL_USER" "$VENV_DIR/bin/python3" -m pip install -r "$RPI_REQ"
 elif [ -f "$ROOT_REQ" ]; then
     info "Instalando dependencias de $ROOT_REQ..."
-    sudo -u "$REAL_USER" "$VENV_DIR/bin/pip" install -r "$ROOT_REQ"
+    sudo -u "$REAL_USER" "$VENV_DIR/bin/python3" -m pip install -r "$ROOT_REQ"
 else
     warn "Arquivo de requirements nao encontrado. Instalando bibliotecas padrao..."
-    sudo -u "$REAL_USER" "$VENV_DIR/bin/pip" install scapy psutil joblib scikit-learn pandas numpy python-dotenv
+    sudo -u "$REAL_USER" "$VENV_DIR/bin/python3" -m pip install scapy psutil joblib scikit-learn pandas numpy python-dotenv
 fi
 
 success "Ambiente virtual e bibliotecas instalados."
