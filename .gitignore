@@ -25,9 +25,14 @@ data/
 *.pcap
 *.parquet
 
-# Serialized Models and Checkpoints (Preserve directory with .gitkeep)
+# Serialized Models and Checkpoints (Large models ignored, lightweight edge models tracked)
 models/*
 !models/.gitkeep
+!models/dt_pipeline_multiclass.joblib
+!models/DT_multiclass.joblib
+!models/DT_binary.joblib
+!models/scaler_multiclass.joblib
+!models/scaler_binary.joblib
 
 # Unit test / coverage reports
 htmlcov/

@@ -80,16 +80,28 @@ class RPIDetector:
         # Configure Decision Tree Multiclass classifier for attack type identification
         env_use_dt = os.getenv("USE_DT_MULTICLASS_FOR_ATTACKS", "True").strip().lower() == "true"
         self.use_dt_multiclass = use_dt_multiclass if use_dt_multiclass is not None else env_use_dt
-        self.dt_model_path = dt_model_path or os.getenv("DT_MULTICLASS_MODEL_PATH", None) or self._resolve_dt_model_path()
+        candidate_dt_path = dt_model_path or os.getenv("DT_MULTICLASS_MODEL_PATH", None)
+        self.dt_model_path = self._resolve_dt_model_path(candidate_dt_path)
         self.dt_multiclass_pipeline = None
 
-        if self.use_dt_multiclass and self.dt_model_path:
-            try:
-                self.dt_multiclass_pipeline = self._load_dt_pipeline(self.dt_model_path)
-            except Exception as ex:
-                logger.warning(
-                    "Falha ao carregar DT multiclasse de %s: %s. Rótulo genérico será usado em caso de ataque.",
-                    self.dt_model_path, str(ex)
+        if self.use_dt_multiclass:
+            if self.dt_model_path:
+                try:
+                    self.dt_multiclass_pipeline = self._load_dt_pipeline(self.dt_model_path)
+                    if self.dt_multiclass_pipeline is not None:
+                        logger.info("🎯 [DT MULTICLASSE] Carregado com sucesso de: %s", self.dt_model_path)
+                    else:
+                        logger.error(
+                            "❌ [DT MULTICLASSE] Encontrado em '%s', mas falhou ao montar o Pipeline. Verifique scaler_multiclass.joblib.",
+                            self.dt_model_path
+                        )
+                except Exception as ex:
+                    logger.error("❌ Falha ao carregar DT multiclasse (%s): %s", self.dt_model_path, str(ex))
+            else:
+                logger.error(
+                    "❌ [DT MULTICLASSE NÃO ENCONTRADO] O arquivo 'dt_pipeline_multiclass.joblib' ou 'DT_multiclass.joblib' "
+                    "não foi encontrado em nenhum dos diretórios padrão. Os ataques serão rotulados como 'Maligno (Ataque Detectado)'. "
+                    "Certifique-se de copiar 'models/dt_pipeline_multiclass.joblib' ou executar 'git pull'!"
                 )
 
         # Runtime Stats
@@ -105,27 +117,49 @@ class RPIDetector:
         """Finds the default pipeline model joblib based on detection mode."""
         mode_str = "binary" if self.mode == "cascade" else self.mode
         # Check current working directory or parent directory for models/
-        search_dirs = [".", "..", os.path.dirname(os.path.dirname(os.path.abspath(__file__)))]
+        search_dirs = [
+            ".",
+            "..",
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            os.path.dirname(os.path.abspath(__file__)),
+            "/etc/aids",
+            "/home/pi/AIDS"
+        ]
         for base in search_dirs:
             p1 = os.path.join(base, f"models/stacking_pipeline_{mode_str}.joblib")
             if os.path.exists(p1):
-                return p1
+                return os.path.abspath(p1)
             p2 = os.path.join(base, f"models/Stacking_{mode_str}.joblib")
             if os.path.exists(p2):
-                return p2
+                return os.path.abspath(p2)
 
         raise FileNotFoundError(f"Modelo não encontrado para o modo '{self.mode}'. Execute o treinamento primeiro.")
 
-    def _resolve_dt_model_path(self) -> str:
-        """Finds the default DT multiclass model or pipeline joblib."""
-        search_dirs = [".", "..", os.path.dirname(os.path.dirname(os.path.abspath(__file__)))]
-        candidates = [
-            "models/dt_pipeline_multiclass.joblib",
-            "models/DT_multiclass.joblib"
+    def _resolve_dt_model_path(self, candidate_path: str = None) -> str:
+        """Finds the DT multiclass model or pipeline joblib across standard directories."""
+        search_dirs = [
+            ".",
+            "..",
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            os.path.dirname(os.path.abspath(__file__)),
+            "/etc/aids",
+            "/home/pi/AIDS"
         ]
+        candidates = []
+        if candidate_path:
+            candidates.append(candidate_path)
+            candidates.append(os.path.basename(candidate_path))
+            candidates.append(os.path.join("models", os.path.basename(candidate_path)))
+
+        candidates.extend([
+            "models/dt_pipeline_multiclass.joblib",
+            "models/DT_multiclass.joblib",
+            "dt_pipeline_multiclass.joblib",
+            "DT_multiclass.joblib"
+        ])
         for base in search_dirs:
             for cand in candidates:
-                p = os.path.join(base, cand)
+                p = cand if os.path.isabs(cand) else os.path.join(base, cand)
                 if os.path.exists(p):
                     return os.path.abspath(p)
         return None
@@ -263,6 +297,12 @@ class RPIDetector:
                             attack_type = "Maligno (Ataque Detectado)"
                             dt_attack_type = attack_type
                     else:
+                        if self.use_dt_multiclass and self.dt_multiclass_pipeline is None:
+                            logger.warning(
+                                "⚠️ [DT MULTICLASSE INATIVO] Intrusão detectada, mas o modelo DT multiclasse não está carregado. "
+                                "Rotulado como 'Maligno (Ataque Detectado)'. "
+                                "Verifique se 'models/dt_pipeline_multiclass.joblib' existe no Raspberry Pi."
+                            )
                         attack_type = "Maligno (Ataque Detectado)"
                         dt_attack_type = attack_type
 
