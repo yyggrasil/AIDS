@@ -101,9 +101,20 @@ def main():
     )
     parser.add_argument(
         "-m", "--mode",
-        choices=["binary", "multiclass"],
+        choices=["binary", "multiclass", "cascade"],
         default=os.getenv("DETECTION_MODE", "binary").lower(),
-        help="Classification mode: binary (Benign/Malicious) or multiclass (DoS, Exploits, etc.)"
+        help="Classification mode: binary (Benign/Malicious), multiclass, or cascade (binary + DT multiclass)"
+    )
+    parser.add_argument(
+        "--dt-model",
+        type=str,
+        default=os.getenv("DT_MULTICLASS_MODEL_PATH", None),
+        help="Path to Decision Tree multiclass model or pipeline joblib (for attack classification)"
+    )
+    parser.add_argument(
+        "--no-dt-multiclass",
+        action="store_true",
+        help="Disable Decision Tree multiclass attack classification when an attack is detected"
     )
     parser.add_argument(
         "-t", "--threshold",
@@ -228,13 +239,16 @@ def main():
 
     # Initialize Edge Intrusion Detector
     try:
+        use_dt = not args.no_dt_multiclass
         detector = RPIDetector(
             mode=args.mode,
             interface=args.interface,
             threshold=args.threshold,
             dry_run=args.dry_run,
             email_manager=email_manager,
-            detection_logger=detection_logger
+            detection_logger=detection_logger,
+            dt_model_path=args.dt_model,
+            use_dt_multiclass=use_dt
         )
     except Exception as ex:
         logging.critical("❌ Falha ao inicializar o detector: %s", str(ex))
@@ -262,9 +276,10 @@ def main():
             sys.exit(1)
 
     # Live Sniffing Mode
+    dt_status = "Ativo (Decision Tree)" if (detector.use_dt_multiclass and detector.dt_multiclass_pipeline) else "Desativado"
     logging.info("🚀 Iniciando serviço AIDS-RPi no Raspberry Pi...")
-    logging.info("⚙️  Interface: %s | Modo: %s | Limiar: %.2f | Anti-Flood Cooldown: %ds",
-                 args.interface, args.mode.upper(), args.threshold, int(args.cooldown))
+    logging.info("⚙️  Interface: %s | Modo: %s | Limiar: %.2f | DT Multiclasse: %s | Anti-Flood Cooldown: %ds",
+                 args.interface, args.mode.upper(), args.threshold, dt_status, int(args.cooldown))
     if detection_logger.enabled:
         logging.info("📝 Log de Detecções Ativo: %s (Formato: %s | Todos os Fluxos: %s)",
                      detection_logger.log_file, detection_logger.log_format.upper(), detection_logger.log_all_flows)

@@ -233,6 +233,19 @@ def _create_mock_multiclass_pipeline():
     return mock_pipeline
 
 
+def _create_mock_dt_pipeline(predicted_class='DoS', class_prob=0.88):
+    classes = ['Analysis', 'Backdoor', 'Benign', 'DoS', 'Exploits', 'Fuzzers', 'Generic', 'Reconnaissance', 'Shellcode', 'Worms']
+    mock_clf = MagicMock()
+    mock_clf.classes_ = np.array(classes)
+    mock_pipeline = MagicMock()
+    mock_pipeline.named_steps = {'classifier': mock_clf}
+    probs = np.zeros(len(classes))
+    idx = classes.index(predicted_class)
+    probs[idx] = class_prob
+    mock_pipeline.predict_proba.return_value = np.array([probs])
+    return mock_pipeline
+
+
 class TestRPIDetector(unittest.TestCase):
     """Tests for the RPi detector engine and model inference."""
 
@@ -318,6 +331,104 @@ class TestRPIDetector(unittest.TestCase):
         self.assertGreaterEqual(stats['detections_logged'], 1)
         self.assertGreaterEqual(stats['cpu_percent'], 0.0)
         self.assertGreater(stats['ram_used_mb'], 0.0)
+
+    @patch.object(RPIDetector, '_load_pipeline')
+    @patch.object(RPIDetector, '_resolve_model_path', return_value="models/stacking_pipeline_binary.joblib")
+    def test_dt_multiclass_attack_classification(self, mock_resolve, mock_load):
+        """Verifies that when a flow is detected as malicious, DT multiclass identifies the attack type."""
+        mock_load.return_value = _create_mock_binary_pipeline()
+
+        detector = RPIDetector(
+            mode="binary",
+            dry_run=True,
+            email_manager=EmailAlertManager(enabled=False),
+            use_dt_multiclass=True
+        )
+        detector.dt_multiclass_pipeline = _create_mock_dt_pipeline(predicted_class='DoS', class_prob=0.92)
+
+        flow = Flow("192.168.1.100", 50000, "10.0.0.1", 80, "6", start_time=100.0)
+        flow.add_packet(is_fwd=True, pkt_len=100, header_len=20, timestamp=100.0, tcp_flags={'SYN': True})
+        flow.add_packet(is_fwd=False, pkt_len=60, header_len=20, timestamp=100.01, tcp_flags={'SYN': True, 'ACK': True})
+
+        result = detector.predict_flow(flow)
+        self.assertTrue(result['is_attack'])
+        self.assertEqual(result['attack_type'], 'DoS')
+        self.assertEqual(result['dt_attack_type'], 'DoS')
+        self.assertAlmostEqual(result['dt_confidence'], 0.92)
+        self.assertAlmostEqual(result['probability'], 0.9)
+
+    @patch.object(RPIDetector, '_load_pipeline')
+    @patch.object(RPIDetector, '_resolve_model_path', return_value="models/stacking_pipeline_binary.joblib")
+    def test_dt_multiclass_benign_argmax_fallback(self, mock_resolve, mock_load):
+        """When binary detects attack but DT argmax is Benign, selects highest probability attack class."""
+        mock_load.return_value = _create_mock_binary_pipeline()
+
+        detector = RPIDetector(
+            mode="binary",
+            dry_run=True,
+            email_manager=EmailAlertManager(enabled=False),
+            use_dt_multiclass=True
+        )
+        # DT mock where Benign is 0.6, but Exploits is 0.35 (highest attack class)
+        classes = ['Analysis', 'Backdoor', 'Benign', 'DoS', 'Exploits', 'Fuzzers', 'Generic', 'Reconnaissance', 'Shellcode', 'Worms']
+        mock_clf = MagicMock()
+        mock_clf.classes_ = np.array(classes)
+        mock_pipe = MagicMock()
+        mock_pipe.named_steps = {'classifier': mock_clf}
+        probs = np.zeros(len(classes))
+        probs[classes.index('Benign')] = 0.60
+        probs[classes.index('Exploits')] = 0.35
+        mock_pipe.predict_proba.return_value = np.array([probs])
+        detector.dt_multiclass_pipeline = mock_pipe
+
+        flow = Flow("192.168.1.100", 50000, "10.0.0.1", 80, "6", start_time=100.0)
+        flow.add_packet(is_fwd=True, pkt_len=100, header_len=20, timestamp=100.0, tcp_flags={'SYN': True})
+
+        result = detector.predict_flow(flow)
+        self.assertTrue(result['is_attack'])
+        self.assertEqual(result['attack_type'], 'Exploits')
+        self.assertAlmostEqual(result['dt_confidence'], 0.35)
+
+    @patch.object(RPIDetector, '_load_pipeline')
+    @patch.object(RPIDetector, '_resolve_model_path', return_value="models/stacking_pipeline_binary.joblib")
+    def test_dt_multiclass_disabled_fallback(self, mock_resolve, mock_load):
+        """When DT multiclass is disabled, falls back to generic label."""
+        mock_load.return_value = _create_mock_binary_pipeline()
+
+        detector = RPIDetector(
+            mode="binary",
+            dry_run=True,
+            email_manager=EmailAlertManager(enabled=False),
+            use_dt_multiclass=False
+        )
+
+        flow = Flow("192.168.1.100", 50000, "10.0.0.1", 80, "6", start_time=100.0)
+        flow.add_packet(is_fwd=True, pkt_len=100, header_len=20, timestamp=100.0, tcp_flags={'SYN': True})
+
+        result = detector.predict_flow(flow)
+        self.assertTrue(result['is_attack'])
+        self.assertEqual(result['attack_type'], 'Maligno (Ataque Detectado)')
+
+    @patch.object(RPIDetector, '_load_pipeline')
+    @patch.object(RPIDetector, '_resolve_model_path', return_value="models/stacking_pipeline_binary.joblib")
+    def test_cascade_mode_execution(self, mock_resolve, mock_load):
+        """Verifies cascade mode initializes binary stage 1 and uses DT multiclass."""
+        mock_load.return_value = _create_mock_binary_pipeline()
+
+        detector = RPIDetector(
+            mode="cascade",
+            dry_run=True,
+            email_manager=EmailAlertManager(enabled=False),
+            use_dt_multiclass=True
+        )
+        detector.dt_multiclass_pipeline = _create_mock_dt_pipeline(predicted_class='Fuzzers', class_prob=0.85)
+
+        flow = Flow("10.0.0.50", 40000, "10.0.0.1", 22, "6", start_time=150.0)
+        flow.add_packet(is_fwd=True, pkt_len=120, header_len=20, timestamp=150.0, tcp_flags={'SYN': True})
+
+        result = detector.predict_flow(flow)
+        self.assertTrue(result['is_attack'])
+        self.assertEqual(result['attack_type'], 'Fuzzers')
 
 
 if __name__ == '__main__':

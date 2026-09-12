@@ -24,7 +24,7 @@ AIDS_alternativo/
 │   ├── rpi_monitor.py          # CLI de monitoramento contínuo no Raspberry Pi
 │   ├── aids-rpi.service        # Unit file systemd para inicialização automática no boot
 │   ├── requirements.txt        # Dependências específicas para Raspberry Pi OS
-│   ├── .env.example            # Exemplo de configuração SMTP e de rede no RPi
+│   ├── .env-example            # Exemplo de configuração SMTP e de rede no RPi
 │   └── README.md               # Guia passo a passo completo de Edge Deployment
 ├── tests/                      # Testes unitários automatizados (15 testes)
 ├── .env                        # Configurações dinâmicas de treinamento

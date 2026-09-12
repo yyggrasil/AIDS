@@ -32,12 +32,17 @@ Este guia fornece as instruções completas, passo a passo, para implantar e exe
                      [Maligno? Probabilidade >= 0.50]
                       /                            \
                     SIM                            NÃO
-                   /   \                             \
-                  /     \                             \
-  [Email Alert Manager]  [Detection Logger]      [Descarte / Log]
-  - Throttling/Cooldown  - JSONL / CSV / Text
-  - Disparo Assíncrono   - Rotação Automática
-  - HTML + Texto Puro    - Auditoria Forense / SIEM
+                   /                                 \
+                  ▼                                   ▼
+       [DT Multiclasse (Nível 2)]             [Tráfego Benigno]
+       - Define tipo exato de ataque
+       (DoS, Exploits, Fuzzers, etc.)
+                /          \
+               ▼            ▼
+     [Email Alert Manager]  [Detection Logger]
+     - Throttling/Cooldown  - JSONL / CSV / Text
+     - Disparo Assíncrono   - Rotação Automática
+     - HTML + Texto Puro    - Auditoria Forense / SIEM
 ```
 
 ---

@@ -112,7 +112,12 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
         models_dict['DT'] = m
         path = f'models/DT_{target_mode}.joblib'
         joblib.dump(m, path)
-        print(f"Decision Tree treinada e salva com sucesso em {path}")
+        dt_pipeline = Pipeline(steps=[
+            ('preprocessor', preprocessor),
+            ('classifier', m)
+        ])
+        joblib.dump(dt_pipeline, f'models/dt_pipeline_{target_mode}.joblib')
+        print(f"Decision Tree treinada e salva com sucesso em {path} e models/dt_pipeline_{target_mode}.joblib")
     else:
         path = f'models/DT_{target_mode}.joblib'
         if os.path.exists(path):
