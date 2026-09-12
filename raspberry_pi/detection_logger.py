@@ -235,6 +235,9 @@ class DetectionLogger:
             "is_attack": is_attack,
             "confidence": round(prob, 4),
             "confidence_pct": f"{prob * 100:.2f}%",
+            "dt_attack_type": res.get("dt_attack_type", attack_type if is_attack else None),
+            "dt_confidence": round(float(res.get("dt_confidence", 0.0)), 4) if "dt_confidence" in res else None,
+            "dt_probabilities": res.get("dt_probabilities", None),
             "source": {
                 "ip": src_ip,
                 "port": src_port
