@@ -121,6 +121,37 @@ class TestFlowAggregation(unittest.TestCase):
         # Capacity was 2, so oldest flow should have been evicted
         self.assertLessEqual(len(agg.flows), 2)
 
+    def test_udp_flow_aggregation_and_categorization(self):
+        """Verifies UDP packet parsing, flow aggregation, 1-pkt rate protection, and model categorization."""
+        p_udp = IP(src="192.168.1.100", dst="8.8.8.8")/UDP(sport=53000, dport=53)/(b"X" * 64)
+        p_udp.time = 100.0
+        flow = self.aggregator.process_packet(p_udp)
+
+        self.assertIsNotNone(flow)
+        self.assertEqual(flow.protocol, "17")
+        self.assertEqual(flow.src_port, 53000)
+        self.assertEqual(flow.dst_port, 53)
+        self.assertEqual(flow.fwd_seg_size_min, 8)
+        self.assertEqual(flow.fin_flags, 0)
+        self.assertEqual(flow.syn_flags, 0)
+        self.assertEqual(flow.rst_flags, 0)
+        self.assertEqual(flow.ack_flags, 0)
+        self.assertEqual(flow.psh_flags, 0)
+
+        # Verify rate protection on single UDP packet (prevents false positive flood detection)
+        feats = flow.extract_features()
+        self.assertEqual(feats['Flow Packets/s'], 0.0)
+        self.assertEqual(feats['Flow Bytes/s'], 0.0)
+        self.assertEqual(feats['Fwd Packets/s'], 0.0)
+        self.assertEqual(feats['Bwd Packets/s'], 0.0)
+        self.assertEqual(feats['Protocol'], "17")
+
+        # Verify DataFrame categorization for model pipeline
+        df = flow.to_dataframe()
+        self.assertEqual(df['Protocol'].iloc[0], "17")
+        self.assertTrue(pd.api.types.is_string_dtype(df['Protocol']) or isinstance(df['Protocol'].iloc[0], str))
+        self.assertEqual(flow.get_summary()['protocol_name'], "UDP")
+
 
 class TestEmailAlertManager(unittest.TestCase):
     """Tests for email formatting, SMTP sending, and anti-flood cooldown."""

@@ -77,11 +77,19 @@ class Flow:
     """
 
     def __init__(self, src_ip, src_port, dst_ip, dst_port, protocol, start_time, idle_threshold=5.0):
-        self.src_ip = src_ip
+        self.src_ip = str(src_ip)
         self.src_port = int(src_port)
-        self.dst_ip = dst_ip
+        self.dst_ip = str(dst_ip)
         self.dst_port = int(dst_port)
-        self.protocol = str(protocol)
+
+        # Normalize protocol representation (UDP -> '17', TCP -> '6')
+        proto_str = str(protocol).strip().upper()
+        if proto_str in ('UDP', '17'):
+            self.protocol = '17'
+        elif proto_str in ('TCP', '6'):
+            self.protocol = '6'
+        else:
+            self.protocol = str(protocol)
         
         self.start_time = float(start_time)
         self.last_time = float(start_time)
@@ -113,7 +121,8 @@ class Flow:
         self.fwd_init_win = 0
         self.bwd_init_win = 0
         self.fwd_act_data_pkts = 0
-        self.fwd_seg_size_min = 20  # Default minimum TCP header size
+        # Default minimum header size: 8 bytes for UDP, 20 bytes for TCP
+        self.fwd_seg_size_min = 8 if self.protocol == '17' else 20
 
         # Active / Idle time measurement
         self.active_times = []
@@ -220,11 +229,19 @@ class Flow:
         b_min, b_max, b_mean, b_std, _ = _calc_stats(self.bwd_packet_lengths)
         all_min, all_max, all_mean, all_std, all_var = _calc_stats(self.all_packet_lengths)
 
-        # Rates
-        flow_bytes_s = tot_bytes / duration_sec if duration_sec > 0 else 0.0
-        flow_pkts_s = total_pkts / duration_sec if duration_sec > 0 else 0.0
-        fwd_pkts_s = total_fwd_pkts / duration_sec if duration_sec > 0 else 0.0
-        bwd_pkts_s = total_bwd_pkts / duration_sec if duration_sec > 0 else 0.0
+        # Rate calculations - Zero-rate protection for single-packet / zero-duration flows (prevents UDP false positives)
+        if total_pkts <= 1 or duration_sec <= 0.0:
+            duration_us = 0.0
+            flow_bytes_s = 0.0
+            flow_pkts_s = 0.0
+            fwd_pkts_s = 0.0
+            bwd_pkts_s = 0.0
+        else:
+            eff_dur = max(duration_sec, 0.001)  # Minimum 1ms floor to avoid astronomical rate spikes
+            flow_bytes_s = tot_bytes / eff_dur
+            flow_pkts_s = total_pkts / eff_dur
+            fwd_pkts_s = total_fwd_pkts / eff_dur
+            bwd_pkts_s = total_bwd_pkts / eff_dur
 
         # Inter-Arrival Times
         _, flow_iat_mean, flow_iat_std, flow_iat_max, flow_iat_min = _calc_iats(self.all_timestamps)
@@ -254,10 +271,19 @@ class Flow:
         act_min, act_max, act_mean, act_std, _ = _calc_stats(active_list)
         idle_min, idle_max, idle_mean, idle_std, _ = _calc_stats(idle_list)
 
+        # Categorical Protocol normalization strictly for model OneHotEncoder compatibility
+        proto_str = str(self.protocol).strip().upper()
+        if proto_str in ('UDP', '17'):
+            protocol_cat = '17'
+        elif proto_str in ('TCP', '6'):
+            protocol_cat = '6'
+        else:
+            protocol_cat = str(self.protocol)
+
         features = {
             'Src Port': float(self.src_port),
             'Dst Port': float(self.dst_port),
-            'Protocol': str(self.protocol),
+            'Protocol': protocol_cat,
             'Flow Duration': float(duration_us),
             'Total Fwd Packet': float(total_fwd_pkts),
             'Total Bwd packets': float(total_bwd_pkts),
@@ -329,13 +355,22 @@ class Flow:
         return features
 
     def to_dataframe(self) -> pd.DataFrame:
-        """Converts the extracted features into a single-row Pandas DataFrame."""
-        return pd.DataFrame([self.extract_features()])
+        """Converts the extracted features into a single-row Pandas DataFrame with explicit categorical typing."""
+        df = pd.DataFrame([self.extract_features()])
+        if 'Protocol' in df.columns:
+            df['Protocol'] = df['Protocol'].astype(str)
+        return df
 
     def get_summary(self) -> dict:
         """Returns a high-level summary of the flow for logging and email alerts."""
         duration = max(0.0, self.last_time - self.start_time)
-        proto_name = "TCP" if self.protocol == '6' else ("UDP" if self.protocol == '17' else f"Proto-{self.protocol}")
+        proto_str = str(self.protocol).strip().upper()
+        if proto_str in ('6', 'TCP'):
+            proto_name = "TCP"
+        elif proto_str in ('17', 'UDP'):
+            proto_name = "UDP"
+        else:
+            proto_name = f"Proto-{self.protocol}"
         return {
             'src_ip': self.src_ip,
             'src_port': self.src_port,
@@ -414,10 +449,18 @@ class FlowAggregator:
         payload_len = 0
         tcp_flags = None
 
-        if proto_num == 6 and packet.haslayer(TCP):  # TCP
-            tcp_layer = packet[TCP]
-            src_port = int(tcp_layer.sport)
-            dst_port = int(tcp_layer.dport)
+        if proto_num == 6:  # TCP
+            tcp_layer = packet[TCP] if packet.haslayer(TCP) else None
+            if tcp_layer is None and hasattr(ip_layer, 'payload'):
+                try:
+                    tcp_layer = TCP(bytes(ip_layer.payload))
+                except Exception:
+                    return None
+            if tcp_layer is None:
+                return None
+
+            src_port = int(getattr(tcp_layer, 'sport', 0))
+            dst_port = int(getattr(tcp_layer, 'dport', 0))
             header_len = int(tcp_layer.dataofs * 4) if hasattr(tcp_layer, 'dataofs') and tcp_layer.dataofs else 20
             tcp_window = int(tcp_layer.window) if hasattr(tcp_layer, 'window') else 0
             payload_len = len(tcp_layer.payload) if hasattr(tcp_layer, 'payload') else 0
@@ -433,10 +476,18 @@ class FlowAggregator:
                 'ECE': 'E' in flags_str,
                 'CWR': 'C' in flags_str
             }
-        elif proto_num == 17 and packet.haslayer(UDP):  # UDP
-            udp_layer = packet[UDP]
-            src_port = int(udp_layer.sport)
-            dst_port = int(udp_layer.dport)
+        elif proto_num == 17:  # UDP
+            udp_layer = packet[UDP] if packet.haslayer(UDP) else None
+            if udp_layer is None and hasattr(ip_layer, 'payload'):
+                try:
+                    udp_layer = UDP(bytes(ip_layer.payload))
+                except Exception:
+                    return None
+            if udp_layer is None:
+                return None
+
+            src_port = int(getattr(udp_layer, 'sport', 0))
+            dst_port = int(getattr(udp_layer, 'dport', 0))
             header_len = 8
             payload_len = len(udp_layer.payload) if hasattr(udp_layer, 'payload') else 0
         else:
