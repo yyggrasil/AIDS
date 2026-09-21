@@ -4,7 +4,11 @@ Ensures raspberry_pi/.env is discovered and loaded with priority over the root .
 """
 
 import os
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(*args, **kwargs):
+        pass
 
 
 def load_rpi_env(override: bool = True):

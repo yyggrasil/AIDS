@@ -152,6 +152,32 @@ class TestFlowAggregation(unittest.TestCase):
         self.assertTrue(pd.api.types.is_string_dtype(df['Protocol']) or isinstance(df['Protocol'].iloc[0], str))
         self.assertEqual(flow.get_summary()['protocol_name'], "UDP")
 
+    def test_tcp_single_packet_rate_preservation(self):
+        """Verifies that TCP SYN probes retain positive rate signals instead of collapsing to 0.0."""
+        p_tcp = IP(src="192.168.1.100", dst="10.0.0.1")/TCP(sport=54321, dport=80, flags="S")
+        p_tcp.time = 100.0
+        flow = self.aggregator.process_packet(p_tcp)
+
+        self.assertIsNotNone(flow)
+        self.assertEqual(flow.protocol, "6")
+        feats = flow.extract_features()
+        self.assertGreater(feats['Flow Packets/s'], 0.0)
+        self.assertGreater(feats['Flow Bytes/s'], 0.0)
+        self.assertEqual(feats['Flow Duration'], 1.0)
+
+    def test_host_port_scan_detection(self):
+        """Verifies that scanning multiple distinct destination ports triggers host-level port scan flag."""
+        agg = FlowAggregator(scan_threshold=5, scan_window=5.0)
+        t0 = 200.0
+        last_flow = None
+        for port in range(1, 7):
+            pkt = IP(src="192.168.1.50", dst="192.168.1.2")/TCP(sport=40000 + port, dport=port, flags="S")
+            pkt.time = t0 + (port * 0.01)
+            last_flow = agg.process_packet(pkt)
+
+        self.assertIsNotNone(last_flow)
+        self.assertTrue(getattr(last_flow, 'is_port_scan', False))
+
 
 class TestEmailAlertManager(unittest.TestCase):
     """Tests for email formatting, SMTP sending, and anti-flood cooldown."""
@@ -460,6 +486,59 @@ class TestRPIDetector(unittest.TestCase):
         result = detector.predict_flow(flow)
         self.assertTrue(result['is_attack'])
         self.assertEqual(result['attack_type'], 'Fuzzers')
+
+    @patch.object(RPIDetector, '_load_pipeline')
+    @patch.object(RPIDetector, '_resolve_model_path', return_value="models/stacking_pipeline_binary.joblib")
+    def test_port_scan_immediate_classification(self, mock_resolve, mock_load):
+        """Verifies that a flow marked as port scan is classified as Reconnaissance."""
+        mock_pipeline = MagicMock()
+        mock_clf = MagicMock()
+        mock_clf.classes_ = np.array([0, 1])
+        mock_pipeline.named_steps = {'classifier': mock_clf}
+        mock_pipeline.predict_proba.return_value = np.array([[0.85, 0.15]])
+        mock_load.return_value = mock_pipeline
+
+        detector = RPIDetector(
+            mode="binary",
+            dry_run=True,
+            email_manager=EmailAlertManager(enabled=False)
+        )
+
+        flow = Flow("192.168.1.50", 40001, "192.168.1.2", 22, "6", start_time=100.0)
+        flow.is_port_scan = True
+        result = detector.predict_flow(flow)
+
+        self.assertTrue(result['is_attack'])
+        self.assertEqual(result['attack_type'], 'Reconnaissance')
+        self.assertGreaterEqual(result['probability'], 0.99)
+
+    @patch.object(RPIDetector, '_load_pipeline')
+    @patch.object(RPIDetector, '_resolve_model_path', return_value="models/stacking_pipeline_binary.joblib")
+    def test_no_duplicate_evaluation_on_rst(self, mock_resolve, mock_load):
+        """Verifies that flows evaluated upon RST termination are not re-evaluated during periodic flush."""
+        mock_load.return_value = _create_mock_binary_pipeline()
+        detector = RPIDetector(
+            mode="binary",
+            dry_run=True,
+            email_manager=EmailAlertManager(enabled=False)
+        )
+
+        t0 = 100.0
+        p1 = IP(src="192.168.1.50", dst="192.168.1.2")/TCP(sport=50001, dport=80, flags="S")
+        p1.time = t0
+        detector.process_packet(p1)
+
+        # RST received: finishes flow and evaluates once
+        p2 = IP(src="192.168.1.2", dst="192.168.1.50")/TCP(sport=80, dport=50001, flags="RA")
+        p2.time = t0 + 0.001
+        detector.process_packet(p2)
+
+        self.assertEqual(detector.total_flows_evaluated, 1)
+
+        # Periodic flush should not re-evaluate the already-evaluated flow
+        flushed = detector.flush_and_detect(current_time=t0 + 5.0)
+        self.assertEqual(len(flushed), 0)
+        self.assertEqual(detector.total_flows_evaluated, 1)
 
 
 if __name__ == '__main__':

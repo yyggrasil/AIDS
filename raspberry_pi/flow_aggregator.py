@@ -132,6 +132,8 @@ class Flow:
 
         # State flags
         self.is_finished = False
+        self.is_port_scan = False
+        self.is_evaluated = False
 
     def add_packet(self, is_fwd: bool, pkt_len: int, header_len: int, timestamp: float,
                    tcp_flags: dict = None, tcp_window: int = 0, payload_len: int = 0):
@@ -229,15 +231,24 @@ class Flow:
         b_min, b_max, b_mean, b_std, _ = _calc_stats(self.bwd_packet_lengths)
         all_min, all_max, all_mean, all_std, all_var = _calc_stats(self.all_packet_lengths)
 
-        # Rate calculations - Zero-rate protection for single-packet / zero-duration flows (prevents UDP false positives)
+        # Rate calculations - Zero-rate protection for single-packet UDP flows (prevents false positives on DNS)
+        # while preserving rate signals for TCP port scan probes and microsecond LAN flows
         if total_pkts <= 1 or duration_sec <= 0.0:
-            duration_us = 0.0
-            flow_bytes_s = 0.0
-            flow_pkts_s = 0.0
-            fwd_pkts_s = 0.0
-            bwd_pkts_s = 0.0
+            if self.protocol == '17':
+                duration_us = 0.0
+                flow_bytes_s = 0.0
+                flow_pkts_s = 0.0
+                fwd_pkts_s = 0.0
+                bwd_pkts_s = 0.0
+            else:
+                duration_us = 1.0
+                eff_dur = 1e-4  # 100 microseconds nominal reference duration for rapid probes
+                flow_bytes_s = tot_bytes / eff_dur
+                flow_pkts_s = total_pkts / eff_dur
+                fwd_pkts_s = total_fwd_pkts / eff_dur
+                bwd_pkts_s = 0.0
         else:
-            eff_dur = max(duration_sec, 0.001)  # Minimum 1ms floor to avoid astronomical rate spikes
+            eff_dur = max(duration_sec, 1e-6)  # Accurate microsecond resolution without 1ms distortion
             flow_bytes_s = tot_bytes / eff_dur
             flow_pkts_s = total_pkts / eff_dur
             fwd_pkts_s = total_fwd_pkts / eff_dur
@@ -396,14 +407,20 @@ class FlowAggregator:
     """
 
     def __init__(self, inactivity_timeout: float = 15.0, active_timeout: float = 120.0,
-                 max_flows: int = 10000, idle_threshold: float = 5.0):
+                 max_flows: int = 10000, idle_threshold: float = 5.0,
+                 scan_threshold: int = 15, scan_window: float = 5.0):
         self.inactivity_timeout = float(inactivity_timeout)
         self.active_timeout = float(active_timeout)
         self.max_flows = int(max_flows)
         self.idle_threshold = float(idle_threshold)
+        self.scan_threshold = int(scan_threshold)
+        self.scan_window = float(scan_window)
         
         # Active flows map: fwd_key -> Flow
         self.flows = {}
+
+        # Host-level port scan tracking: (src_ip, dst_ip) -> [(timestamp, dst_port), ...]
+        self.host_scans = defaultdict(list)
 
         self.total_packets_processed = 0
         self.total_flows_flushed = 0
@@ -439,7 +456,8 @@ class FlowAggregator:
         src_ip = ip_layer.src
         dst_ip = ip_layer.dst
         proto_num = ip_layer.proto
-        pkt_len = len(packet)
+        # Use IPv4 datagram length (matching CICFlowMeter standard) instead of Layer 2 Ethernet frame
+        pkt_len = int(ip_layer.len) if hasattr(ip_layer, 'len') and ip_layer.len else len(ip_layer)
         timestamp = float(packet.time if hasattr(packet, 'time') and packet.time else time.time())
 
         src_port = 0
@@ -526,6 +544,19 @@ class FlowAggregator:
         proto = info['proto']
         timestamp = info['timestamp']
 
+        # Correlate host-level port scans (e.g. Nmap / Metasploit port scans)
+        is_port_scan = False
+        tcp_flags = info.get('tcp_flags')
+        if proto == '6' and tcp_flags and tcp_flags.get('SYN', False):
+            host_key = (src_ip, dst_ip)
+            # Prune older entries outside the sliding scan window
+            cutoff = timestamp - self.scan_window
+            self.host_scans[host_key] = [(t, p) for t, p in self.host_scans[host_key] if t >= cutoff]
+            self.host_scans[host_key].append((timestamp, dst_port))
+            distinct_ports = {p for _, p in self.host_scans[host_key]}
+            if len(distinct_ports) >= self.scan_threshold:
+                is_port_scan = True
+
         fwd_key = (src_ip, src_port, dst_ip, dst_port, proto)
         bwd_key = (dst_ip, dst_port, src_ip, src_port, proto)
 
@@ -552,12 +583,15 @@ class FlowAggregator:
             self.flows[fwd_key] = flow
             is_fwd = True
 
+        if is_port_scan:
+            flow.is_port_scan = True
+
         flow.add_packet(
             is_fwd=is_fwd,
             pkt_len=info['pkt_len'],
             header_len=info['header_len'],
             timestamp=timestamp,
-            tcp_flags=info.get('tcp_flags'),
+            tcp_flags=tcp_flags,
             tcp_window=info.get('tcp_window', 0),
             payload_len=info.get('payload_len', 0)
         )
@@ -574,6 +608,9 @@ class FlowAggregator:
         keys_to_remove = []
 
         for key, flow in self.flows.items():
+            if getattr(flow, 'is_evaluated', False):
+                keys_to_remove.append(key)
+                continue
             if force or flow.is_expired(now, inactivity_timeout=self.inactivity_timeout, active_timeout=self.active_timeout):
                 expired_flows.append(flow)
                 keys_to_remove.append(key)

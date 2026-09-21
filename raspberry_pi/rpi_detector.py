@@ -242,11 +242,13 @@ class RPIDetector:
             clf = self.pipeline.named_steps['classifier']
             classes = list(clf.classes_)
 
+            is_scan = getattr(flow, 'is_port_scan', False)
+
             if self.mode in ("binary", "cascade"):
                 # Class 0: Benign, Class 1: Malicious
                 malicious_idx = 1 if 1 in classes else (classes.index('1') if '1' in classes else len(classes) - 1)
                 malicious_prob = float(proba_arr[malicious_idx])
-                is_attack = malicious_prob >= self.threshold
+                is_attack = (malicious_prob >= self.threshold) or is_scan
 
                 dt_confidence = 0.0
                 dt_attack_type = None
@@ -257,8 +259,13 @@ class RPIDetector:
                     prob = float(proba_arr[0])
                 else:
                     # Flow detected as malicious!
-                    # Stage 2: Use Decision Tree (DT) multiclass algorithm to determine the attack type
-                    if self.use_dt_multiclass and self.dt_multiclass_pipeline is not None:
+                    if is_scan and not (malicious_prob >= self.threshold):
+                        attack_type = "Reconnaissance"
+                        dt_attack_type = "Reconnaissance"
+                        dt_confidence = 0.99
+                        malicious_prob = 0.99
+                        logger.warning("🎯 [SCAN DETECTADO] Reconnaissance/PortScan identificado para %s -> %s!", summary['src_ip'], summary['dst_ip'])
+                    elif self.use_dt_multiclass and self.dt_multiclass_pipeline is not None:
                         try:
                             dt_proba_arr = self.dt_multiclass_pipeline.predict_proba(df)[0]
                             dt_clf = self.dt_multiclass_pipeline.named_steps['classifier']
@@ -324,8 +331,12 @@ class RPIDetector:
                 best_idx = int(np.argmax(proba_arr))
                 pred_label = str(classes[best_idx])
                 prob = float(proba_arr[best_idx])
-                is_attack = (pred_label.strip().upper() != "BENIGN") and (prob >= self.threshold)
-                attack_type = pred_label if is_attack else "Benign"
+                is_attack = ((pred_label.strip().upper() != "BENIGN") and (prob >= self.threshold)) or is_scan
+                if is_scan and not ((pred_label.strip().upper() != "BENIGN") and (prob >= self.threshold)):
+                    attack_type = "Reconnaissance"
+                    prob = 0.99
+                else:
+                    attack_type = pred_label if is_attack else "Benign"
 
                 return {
                     'is_attack': is_attack,
@@ -346,13 +357,15 @@ class RPIDetector:
     def process_packet(self, packet):
         """Processes an incoming raw packet."""
         flow = self.aggregator.process_packet(packet)
-        # If TCP FIN or RST finished the flow immediately, evaluate it
-        if flow and flow.is_finished:
-            self._evaluate_single_flow(flow)
+        # If TCP FIN or RST finished the flow immediately, or port scan detected, evaluate it
+        if flow and (flow.is_finished or getattr(flow, 'is_port_scan', False)):
+            if not getattr(flow, 'is_evaluated', False):
+                self._evaluate_single_flow(flow)
         return flow
 
     def _evaluate_single_flow(self, flow: Flow):
         """Classifies a completed flow and dispatches alerts if malicious."""
+        flow.is_evaluated = True
         res = self.predict_flow(flow)
         with self._stats_lock:
             self.total_flows_evaluated += 1
