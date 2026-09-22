@@ -153,7 +153,7 @@ class TestFlowAggregation(unittest.TestCase):
         self.assertEqual(flow.get_summary()['protocol_name'], "UDP")
 
     def test_tcp_single_packet_rate_preservation(self):
-        """Verifies that TCP SYN probes retain positive rate signals instead of collapsing to 0.0."""
+        """Verifies that TCP SYN probes retain packet rate signals while conforming to 0 payload byte rate."""
         p_tcp = IP(src="192.168.1.100", dst="10.0.0.1")/TCP(sport=54321, dport=80, flags="S")
         p_tcp.time = 100.0
         flow = self.aggregator.process_packet(p_tcp)
@@ -162,8 +162,16 @@ class TestFlowAggregation(unittest.TestCase):
         self.assertEqual(flow.protocol, "6")
         feats = flow.extract_features()
         self.assertGreater(feats['Flow Packets/s'], 0.0)
-        self.assertGreater(feats['Flow Bytes/s'], 0.0)
+        # In CICFlowMeter, flows without payload bytes have 0.0 Flow Bytes/s
+        self.assertEqual(feats['Flow Bytes/s'], 0.0)
         self.assertEqual(feats['Flow Duration'], 1.0)
+
+        # A packet with payload retains positive Flow Bytes/s
+        p_data = IP(src="192.168.1.100", dst="10.0.0.1")/TCP(sport=54322, dport=80, flags="PA")/b"PAYLOAD"
+        p_data.time = 101.0
+        flow_data = self.aggregator.process_packet(p_data)
+        feats_data = flow_data.extract_features()
+        self.assertGreater(feats_data['Flow Bytes/s'], 0.0)
 
     def test_host_port_scan_detection(self):
         """Verifies that scanning multiple distinct destination ports triggers host-level port scan flag."""

@@ -162,15 +162,19 @@ class Flow:
 
         self.last_time = timestamp
         self.all_timestamps.append(timestamp)
-        self.all_packet_lengths.append(pkt_len)
+        # In CICFlowMeter, all packet length statistics (min, max, mean, std, var,
+        # total lengths, avg packet size, segment sizes, and flow bytes/s) are strictly
+        # computed on transport layer payload bytes (packet.getPayloadBytes()), NOT on IP wire length.
+        # Header lengths are tracked independently via fwd/bwd_header_lengths.
+        self.all_packet_lengths.append(payload_len)
 
         if is_fwd:
             self.fwd_timestamps.append(timestamp)
-            self.fwd_packet_lengths.append(pkt_len)
+            self.fwd_packet_lengths.append(payload_len)
             self.fwd_header_lengths.append(header_len)
             if header_len > 0 and (header_len < self.fwd_seg_size_min or len(self.fwd_header_lengths) == 1):
                 self.fwd_seg_size_min = header_len
-            if len(self.fwd_timestamps) == 1 and tcp_window > 0:
+            if len(self.fwd_timestamps) == 1:
                 self.fwd_init_win = int(tcp_window)
             if payload_len > 0:
                 self.fwd_act_data_pkts += 1
@@ -178,9 +182,9 @@ class Flow:
                 self.fwd_psh_flags += 1
         else:
             self.bwd_timestamps.append(timestamp)
-            self.bwd_packet_lengths.append(pkt_len)
+            self.bwd_packet_lengths.append(payload_len)
             self.bwd_header_lengths.append(header_len)
-            if len(self.bwd_timestamps) == 1 and tcp_window > 0:
+            if len(self.bwd_timestamps) == 1:
                 self.bwd_init_win = int(tcp_window)
 
         # Global TCP flags count
