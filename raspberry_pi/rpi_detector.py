@@ -60,11 +60,16 @@ class RPIDetector:
         self.threshold = float(threshold)
         self.dry_run = dry_run
 
+        scan_threshold = int(os.getenv("PORT_SCAN_THRESHOLD", "15"))
+        flood_threshold = int(os.getenv("CONN_FLOOD_THRESHOLD", "20"))
+
         # Initialize Flow Aggregator
         self.aggregator = FlowAggregator(
             inactivity_timeout=inactivity_timeout,
             active_timeout=active_timeout,
-            max_flows=max_flows
+            max_flows=max_flows,
+            scan_threshold=scan_threshold,
+            flood_threshold=flood_threshold
         )
 
         # Initialize Email Alert Manager
@@ -243,12 +248,13 @@ class RPIDetector:
             classes = list(clf.classes_)
 
             is_scan = getattr(flow, 'is_port_scan', False)
+            is_flood = getattr(flow, 'is_conn_flood', False)
 
             if self.mode in ("binary", "cascade"):
                 # Class 0: Benign, Class 1: Malicious
                 malicious_idx = 1 if 1 in classes else (classes.index('1') if '1' in classes else len(classes) - 1)
                 malicious_prob = float(proba_arr[malicious_idx])
-                is_attack = (malicious_prob >= self.threshold) or is_scan
+                is_attack = (malicious_prob >= self.threshold) or is_scan or is_flood
 
                 dt_confidence = 0.0
                 dt_attack_type = None
@@ -259,7 +265,16 @@ class RPIDetector:
                     prob = float(proba_arr[0])
                 else:
                     # Flow detected as malicious!
-                    if is_scan and not (malicious_prob >= self.threshold):
+                    if is_flood:
+                        attack_type = "DoS"
+                        dt_attack_type = "DoS"
+                        dt_confidence = 0.99
+                        malicious_prob = 0.99
+                        logger.warning(
+                            "🚨 [DOS DETECTADO] Inundação de Conexões (Connection Flood / DoS) identificada para %s -> %s na porta %s!",
+                            summary['src_ip'], summary['dst_ip'], summary['dst_port']
+                        )
+                    elif is_scan and not (malicious_prob >= self.threshold):
                         attack_type = "Reconnaissance"
                         dt_attack_type = "Reconnaissance"
                         dt_confidence = 0.99
@@ -331,8 +346,15 @@ class RPIDetector:
                 best_idx = int(np.argmax(proba_arr))
                 pred_label = str(classes[best_idx])
                 prob = float(proba_arr[best_idx])
-                is_attack = ((pred_label.strip().upper() != "BENIGN") and (prob >= self.threshold)) or is_scan
-                if is_scan and not ((pred_label.strip().upper() != "BENIGN") and (prob >= self.threshold)):
+                is_attack = ((pred_label.strip().upper() != "BENIGN") and (prob >= self.threshold)) or is_scan or is_flood
+                if is_flood:
+                    attack_type = "DoS"
+                    prob = 0.99
+                    logger.warning(
+                        "🚨 [DOS DETECTADO] Inundação de Conexões (Connection Flood / DoS) identificada para %s -> %s na porta %s!",
+                        summary['src_ip'], summary['dst_ip'], summary['dst_port']
+                    )
+                elif is_scan and not ((pred_label.strip().upper() != "BENIGN") and (prob >= self.threshold)):
                     attack_type = "Reconnaissance"
                     prob = 0.99
                 else:
@@ -357,8 +379,8 @@ class RPIDetector:
     def process_packet(self, packet):
         """Processes an incoming raw packet."""
         flow = self.aggregator.process_packet(packet)
-        # If TCP FIN or RST finished the flow immediately, or port scan detected, evaluate it
-        if flow and (flow.is_finished or getattr(flow, 'is_port_scan', False)):
+        # If TCP FIN or RST finished the flow immediately, or port scan/flood detected, evaluate it
+        if flow and (flow.is_finished or getattr(flow, 'is_port_scan', False) or getattr(flow, 'is_conn_flood', False)):
             if not getattr(flow, 'is_evaluated', False):
                 self._evaluate_single_flow(flow)
         return flow

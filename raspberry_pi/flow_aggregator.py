@@ -133,6 +133,7 @@ class Flow:
         # State flags
         self.is_finished = False
         self.is_port_scan = False
+        self.is_conn_flood = False
         self.is_evaluated = False
 
     def add_packet(self, is_fwd: bool, pkt_len: int, header_len: int, timestamp: float,
@@ -412,13 +413,16 @@ class FlowAggregator:
 
     def __init__(self, inactivity_timeout: float = 15.0, active_timeout: float = 120.0,
                  max_flows: int = 10000, idle_threshold: float = 5.0,
-                 scan_threshold: int = 15, scan_window: float = 5.0):
+                 scan_threshold: int = 15, scan_window: float = 5.0,
+                 flood_threshold: int = 20, flood_window: float = 5.0):
         self.inactivity_timeout = float(inactivity_timeout)
         self.active_timeout = float(active_timeout)
         self.max_flows = int(max_flows)
         self.idle_threshold = float(idle_threshold)
         self.scan_threshold = int(scan_threshold)
         self.scan_window = float(scan_window)
+        self.flood_threshold = int(flood_threshold)
+        self.flood_window = float(flood_window)
         
         # Active flows map: fwd_key -> Flow
         self.flows = {}
@@ -548,18 +552,27 @@ class FlowAggregator:
         proto = info['proto']
         timestamp = info['timestamp']
 
-        # Correlate host-level port scans (e.g. Nmap / Metasploit port scans)
+        # Correlate host-level port scans (e.g. Nmap / Metasploit port scans) and connection floods (DoS)
         is_port_scan = False
+        is_conn_flood = False
         tcp_flags = info.get('tcp_flags')
-        if proto == '6' and tcp_flags and tcp_flags.get('SYN', False):
+        # Only evaluate client initiation SYNs (exclude server SYN-ACK replies to avoid false positives on ephemeral ports)
+        if proto == '6' and tcp_flags and tcp_flags.get('SYN', False) and not tcp_flags.get('ACK', False):
             host_key = (src_ip, dst_ip)
-            # Prune older entries outside the sliding scan window
-            cutoff = timestamp - self.scan_window
+            max_win = max(self.scan_window, self.flood_window)
+            cutoff = timestamp - max_win
             self.host_scans[host_key] = [(t, p) for t, p in self.host_scans[host_key] if t >= cutoff]
             self.host_scans[host_key].append((timestamp, dst_port))
-            distinct_ports = {p for _, p in self.host_scans[host_key]}
+
+            scan_ports = [p for t, p in self.host_scans[host_key] if t >= (timestamp - self.scan_window)]
+            distinct_ports = {p for p in scan_ports}
+
+            flood_conns = [p for t, p in self.host_scans[host_key] if t >= (timestamp - self.flood_window)]
+
             if len(distinct_ports) >= self.scan_threshold:
                 is_port_scan = True
+            elif len(flood_conns) >= self.flood_threshold:
+                is_conn_flood = True
 
         fwd_key = (src_ip, src_port, dst_ip, dst_port, proto)
         bwd_key = (dst_ip, dst_port, src_ip, src_port, proto)
@@ -589,6 +602,8 @@ class FlowAggregator:
 
         if is_port_scan:
             flow.is_port_scan = True
+        if is_conn_flood:
+            flow.is_conn_flood = True
 
         flow.add_packet(
             is_fwd=is_fwd,

@@ -185,6 +185,36 @@ class TestFlowAggregation(unittest.TestCase):
 
         self.assertIsNotNone(last_flow)
         self.assertTrue(getattr(last_flow, 'is_port_scan', False))
+        self.assertFalse(getattr(last_flow, 'is_conn_flood', False))
+
+    def test_host_conn_flood_detection(self):
+        """Verifies that flooding the SAME destination port triggers conn_flood and NOT port_scan."""
+        agg = FlowAggregator(scan_threshold=10, flood_threshold=5, flood_window=5.0)
+        t0 = 300.0
+        last_flow = None
+        for i in range(1, 7):
+            pkt = IP(src="192.168.1.50", dst="192.168.1.2")/TCP(sport=40000 + i, dport=80, flags="S")
+            pkt.time = t0 + (i * 0.01)
+            last_flow = agg.process_packet(pkt)
+
+        self.assertIsNotNone(last_flow)
+        self.assertTrue(getattr(last_flow, 'is_conn_flood', False))
+        self.assertFalse(getattr(last_flow, 'is_port_scan', False))
+
+    def test_syn_ack_does_not_trigger_port_scan(self):
+        """Verifies that server SYN-ACK replies to ephemeral ports do NOT trigger port scan."""
+        agg = FlowAggregator(scan_threshold=5, scan_window=5.0)
+        t0 = 400.0
+        last_flow = None
+        for port in range(1, 7):
+            # Server responding with SYN-ACK (flags='SA') to client's ephemeral port
+            pkt = IP(src="192.168.1.2", dst="192.168.1.50")/TCP(sport=80, dport=50000 + port, flags="SA")
+            pkt.time = t0 + (port * 0.01)
+            last_flow = agg.process_packet(pkt)
+
+        self.assertIsNotNone(last_flow)
+        self.assertFalse(getattr(last_flow, 'is_port_scan', False))
+        self.assertFalse(getattr(last_flow, 'is_conn_flood', False))
 
 
 class TestEmailAlertManager(unittest.TestCase):
@@ -518,6 +548,31 @@ class TestRPIDetector(unittest.TestCase):
 
         self.assertTrue(result['is_attack'])
         self.assertEqual(result['attack_type'], 'Reconnaissance')
+        self.assertGreaterEqual(result['probability'], 0.99)
+
+    @patch.object(RPIDetector, '_load_pipeline')
+    @patch.object(RPIDetector, '_resolve_model_path', return_value="models/stacking_pipeline_binary.joblib")
+    def test_conn_flood_immediate_classification(self, mock_resolve, mock_load):
+        """Verifies that a flow marked as connection flood is classified as DoS."""
+        mock_pipeline = MagicMock()
+        mock_clf = MagicMock()
+        mock_clf.classes_ = np.array([0, 1])
+        mock_pipeline.named_steps = {'classifier': mock_clf}
+        mock_pipeline.predict_proba.return_value = np.array([[0.85, 0.15]])
+        mock_load.return_value = mock_pipeline
+
+        detector = RPIDetector(
+            mode="binary",
+            dry_run=True,
+            email_manager=EmailAlertManager(enabled=False)
+        )
+
+        flow = Flow("192.168.1.50", 40001, "192.168.1.2", 80, "6", start_time=100.0)
+        flow.is_conn_flood = True
+        result = detector.predict_flow(flow)
+
+        self.assertTrue(result['is_attack'])
+        self.assertEqual(result['attack_type'], 'DoS')
         self.assertGreaterEqual(result['probability'], 0.99)
 
     @patch.object(RPIDetector, '_load_pipeline')
