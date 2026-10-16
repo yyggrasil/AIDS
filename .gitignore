@@ -51,4 +51,7 @@ htmlcov/
 # Logs
 *.log
 *.jsonl
-logs/
+logs/
+
+# codigo para teste (potencialmente perigoso)
+simulate_traffic.py
