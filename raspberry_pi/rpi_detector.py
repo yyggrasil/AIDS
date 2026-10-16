@@ -53,7 +53,9 @@ class RPIDetector:
         email_manager: EmailAlertManager = None,
         detection_logger: DetectionLogger = None,
         dt_model_path: str = None,
-        use_dt_multiclass: bool = None
+        use_dt_multiclass: bool = None,
+        ignore_broadcast_multicast: bool = None,
+        ignore_discovery_ports: set = None
     ):
         self.mode = mode.lower()
         self.interface = interface or os.getenv("NETWORK_INTERFACE", "eth0")
@@ -63,13 +65,21 @@ class RPIDetector:
         scan_threshold = int(os.getenv("PORT_SCAN_THRESHOLD", "15"))
         flood_threshold = int(os.getenv("CONN_FLOOD_THRESHOLD", "20"))
 
+        if ignore_broadcast_multicast is None:
+            ignore_broadcast_multicast = os.getenv("IGNORE_BROADCAST_MULTICAST", "True").strip().lower() == "true"
+        if ignore_discovery_ports is None:
+            ports_str = os.getenv("IGNORE_LOCAL_DISCOVERY_PORTS", "1900,5353,5355,137,138,27036,67,68")
+            ignore_discovery_ports = {int(p.strip()) for p in ports_str.split(",") if p.strip().isdigit()}
+
         # Initialize Flow Aggregator
         self.aggregator = FlowAggregator(
             inactivity_timeout=inactivity_timeout,
             active_timeout=active_timeout,
             max_flows=max_flows,
             scan_threshold=scan_threshold,
-            flood_threshold=flood_threshold
+            flood_threshold=flood_threshold,
+            ignore_broadcast_multicast=ignore_broadcast_multicast,
+            ignore_discovery_ports=ignore_discovery_ports
         )
 
         # Initialize Email Alert Manager
@@ -388,6 +398,30 @@ class RPIDetector:
     def _evaluate_single_flow(self, flow: Flow):
         """Classifies a completed flow and dispatches alerts if malicious."""
         flow.is_evaluated = True
+
+        # Safety check: discard legitimate broadcast, multicast, or local discovery flows
+        if self.aggregator.ignore_broadcast_multicast and (
+            FlowAggregator.is_broadcast_or_multicast(flow.dst_ip) or 
+            FlowAggregator.is_broadcast_or_multicast(flow.src_ip)
+        ):
+            return {
+                'is_attack': False,
+                'attack_type': "Benign",
+                'probability': 0.0,
+                'flow_summary': flow.get_summary()
+            }
+
+        if self.aggregator.ignore_discovery_ports and (
+            flow.dst_port in self.aggregator.ignore_discovery_ports or
+            flow.src_port in self.aggregator.ignore_discovery_ports
+        ):
+            return {
+                'is_attack': False,
+                'attack_type': "Benign",
+                'probability': 0.0,
+                'flow_summary': flow.get_summary()
+            }
+
         res = self.predict_flow(flow)
         with self._stats_lock:
             self.total_flows_evaluated += 1

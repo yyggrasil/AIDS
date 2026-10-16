@@ -5,6 +5,7 @@ and extracts 70 statistical features matching the CICFlowMeter standard for
 the trained Stacking Classifier pipeline.
 """
 
+import os
 import time
 import math
 import logging
@@ -411,10 +412,32 @@ class FlowAggregator:
     Optimized for low RAM consumption on Raspberry Pi.
     """
 
+    @staticmethod
+    def is_broadcast_or_multicast(ip_str: str) -> bool:
+        """
+        Checks if an IPv4 address is broadcast or multicast.
+        Matches:
+          - 255.255.255.255 (limited broadcast)
+          - Subnet-directed broadcast (ending with .255 in IPv4)
+          - 224.0.0.0/4 (multicast range: 224.0.0.0 - 239.255.255.255)
+        """
+        if not ip_str:
+            return False
+        if ip_str == "255.255.255.255" or ip_str.endswith(".255"):
+            return True
+        dot_idx = ip_str.find('.')
+        if dot_idx != -1:
+            first = ip_str[:dot_idx]
+            if first.isdigit() and 224 <= int(first) <= 239:
+                return True
+        return False
+
     def __init__(self, inactivity_timeout: float = 15.0, active_timeout: float = 120.0,
                  max_flows: int = 10000, idle_threshold: float = 5.0,
                  scan_threshold: int = 15, scan_window: float = 5.0,
-                 flood_threshold: int = 20, flood_window: float = 5.0):
+                 flood_threshold: int = 20, flood_window: float = 5.0,
+                 ignore_broadcast_multicast: bool = None,
+                 ignore_discovery_ports: set = None):
         self.inactivity_timeout = float(inactivity_timeout)
         self.active_timeout = float(active_timeout)
         self.max_flows = int(max_flows)
@@ -423,6 +446,18 @@ class FlowAggregator:
         self.scan_window = float(scan_window)
         self.flood_threshold = int(flood_threshold)
         self.flood_window = float(flood_window)
+
+        # Legitimate traffic filtering (avoids false positive Shellcode/DoS on SSDP, mDNS, etc.)
+        if ignore_broadcast_multicast is not None:
+            self.ignore_broadcast_multicast = bool(ignore_broadcast_multicast)
+        else:
+            self.ignore_broadcast_multicast = os.getenv("IGNORE_BROADCAST_MULTICAST", "True").strip().lower() == "true"
+
+        if ignore_discovery_ports is not None:
+            self.ignore_discovery_ports = {int(p) for p in ignore_discovery_ports}
+        else:
+            ports_str = os.getenv("IGNORE_LOCAL_DISCOVERY_PORTS", "1900,5353,5355,137,138,27036,67,68")
+            self.ignore_discovery_ports = {int(p.strip()) for p in ports_str.split(",") if p.strip().isdigit()}
         
         # Active flows map: fwd_key -> Flow
         self.flows = {}
@@ -464,6 +499,11 @@ class FlowAggregator:
         src_ip = ip_layer.src
         dst_ip = ip_layer.dst
         proto_num = ip_layer.proto
+
+        # Filter out legitimate broadcast/multicast (e.g. SSDP, mDNS, subnet discovery)
+        if self.ignore_broadcast_multicast and (self.is_broadcast_or_multicast(dst_ip) or self.is_broadcast_or_multicast(src_ip)):
+            return None
+
         # Use IPv4 datagram length (matching CICFlowMeter standard) instead of Layer 2 Ethernet frame
         pkt_len = int(ip_layer.len) if hasattr(ip_layer, 'len') and ip_layer.len else len(ip_layer)
         timestamp = float(packet.time if hasattr(packet, 'time') and packet.time else time.time())
@@ -518,6 +558,10 @@ class FlowAggregator:
             payload_len = len(udp_layer.payload) if hasattr(udp_layer, 'payload') else 0
         else:
             # Non-TCP/UDP IP packet
+            return None
+
+        # Filter out legitimate local service discovery ports if configured
+        if self.ignore_discovery_ports and (dst_port in self.ignore_discovery_ports or src_port in self.ignore_discovery_ports):
             return None
 
         return {

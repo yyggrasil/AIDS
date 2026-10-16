@@ -603,6 +603,47 @@ class TestRPIDetector(unittest.TestCase):
         self.assertEqual(len(flushed), 0)
         self.assertEqual(detector.total_flows_evaluated, 1)
 
+    def test_filter_multicast_ssdp_and_mdns(self):
+        """Verifies that legitimate multicast discovery traffic (SSDP/mDNS) is filtered out."""
+        agg = FlowAggregator(ignore_broadcast_multicast=True, ignore_discovery_ports={1900, 5353})
+        
+        # SSDP Multicast (239.255.255.250:1900)
+        p_ssdp = IP(src="192.168.1.100", dst="239.255.255.250")/UDP(sport=50000, dport=1900)/(b"M-SEARCH * HTTP/1.1\r\n")
+        flow_ssdp = agg.process_packet(p_ssdp)
+        self.assertIsNone(flow_ssdp)
+        self.assertEqual(len(agg.flows), 0)
+
+        # mDNS Multicast (224.0.0.251:5353)
+        p_mdns = IP(src="192.168.1.100", dst="224.0.0.251")/UDP(sport=5353, dport=5353)/(b"mDNS query")
+        flow_mdns = agg.process_packet(p_mdns)
+        self.assertIsNone(flow_mdns)
+        self.assertEqual(len(agg.flows), 0)
+
+    def test_filter_broadcast_traffic(self):
+        """Verifies that subnet broadcast and limited broadcast traffic is filtered out."""
+        agg = FlowAggregator(ignore_broadcast_multicast=True)
+
+        # Subnet broadcast (.255)
+        p_sub_bcast = IP(src="192.168.15.24", dst="192.168.15.255")/UDP(sport=27036, dport=27036)/(b"Steam Discovery")
+        flow_sub = agg.process_packet(p_sub_bcast)
+        self.assertIsNone(flow_sub)
+        self.assertEqual(len(agg.flows), 0)
+
+        # Limited broadcast (255.255.255.255)
+        p_lim_bcast = IP(src="192.168.15.32", dst="255.255.255.255")/UDP(sport=50000, dport=6667)/(b"Broadcast message")
+        flow_lim = agg.process_packet(p_lim_bcast)
+        self.assertIsNone(flow_lim)
+        self.assertEqual(len(agg.flows), 0)
+
+    def test_allow_legitimate_unicast_traffic(self):
+        """Verifies that legitimate unicast traffic is NOT filtered out."""
+        agg = FlowAggregator(ignore_broadcast_multicast=True, ignore_discovery_ports={1900, 5353})
+
+        p_unicast = IP(src="192.168.15.24", dst="192.168.15.3")/TCP(sport=54321, dport=80, flags="S")
+        flow = agg.process_packet(p_unicast)
+        self.assertIsNotNone(flow)
+        self.assertEqual(len(agg.flows), 1)
+
 
 if __name__ == '__main__':
     unittest.main()
