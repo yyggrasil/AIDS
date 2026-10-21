@@ -222,7 +222,7 @@ def run_pipeline(target_mode='binary', sample_frac=0.1):
     # 6. Avaliação e Gráficos
     if models_dict:
         print("\nAvaliando modelos no conjunto de Teste e gerando gráficos...")
-        evaluate_models(models_dict, X_test_prep, y_test, results_dir='./results', suffix=target_mode)
+        evaluate_models(models_dict, X_test_prep, y_test, results_dir='./results', suffix=target_mode, preprocessor=preprocessor)
     
     print("\nPipeline Finalizado com Sucesso!")
 

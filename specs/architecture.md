@@ -26,21 +26,59 @@ Para obter alta precisão, excelente poder de generalização e estabilidade em 
   - **Windows (PowerShell):** `.\.venv\Scripts\activate`
   - **Linux / macOS:** `source .venv/bin/activate`
 
-### 2.2. Configuração Dinâmica via Arquivo `.env`
+### 2.2. Configuração Dinâmica via Arquivo `.env` (Pipeline Central de ML)
 
-O comportamento do pipeline de treinamento e avaliação é controlado dinamicamente via variáveis de ambiente carregadas do arquivo `.env`:
+O comportamento do pipeline de treinamento e avaliação (`main.py`) é controlado dinamicamente via variáveis de ambiente carregadas do arquivo `.env` na raiz:
 
 - `TRAIN_LINEARSVC` (bool, default `True`): Habilita o treinamento do modelo LinearSVC isolado.
-- `TRAIN_DT` (bool, default `True`): Habilita o treinamento do modelo Decision Tree isolado.
+- `TRAIN_DT` (bool, default `True`): Habilita o treinamento do modelo Decision Tree isolado (gera também `models/dt_pipeline_{mode}.joblib`).
 - `TRAIN_RF` (bool, default `True`): Habilita o treinamento do modelo Random Forest isolado.
 - `TRAIN_ET` (bool, default `False`): Habilita o treinamento do modelo Extra Trees isolado.
 - `TRAIN_HGB` (bool, default `False`): Habilita o treinamento do modelo HistGradientBoosting isolado.
 - `TRAIN_MLP` (bool, default `True`): Habilita o treinamento da Mini Rede Neural (MLPClassifier) isolada.
 - `TRAIN_STACKING` (bool, default `True`): Habilita o treinamento do Stacking Ensemble.
-- `RUN_BINARY` (bool, default `True`): Executa o pipeline no modo de classificação binária.
-- `RUN_MULTICLASS` (bool, default `False`): Executa o pipeline no modo de classificação multiclasse.
-- `SAMPLE_FRAC` (float, default `0.1`): Fração de amostragem estratificada do dataset (ex: `0.01` para 1%, `0.1` para 10%).
+- `STACKING_PROFILE` (str, default `'edge'`): Seleciona o perfil de estimadores do Stacking (`edge`, `balanced`, `performance`, `legacy`).
+- `STACKING_CV_SPLITS` (int, default `5`): Quantidade de divisões no `StratifiedKFold` para geração out-of-fold das meta-features.
+- `STACKING_PASSTHROUGH` (bool, default `False`): Concatenação das features originais pré-processadas com as meta-features de probabilidade no Meta-Learner.
 - `STACKING_N_JOBS` (int, default `2`): Quantidade de processos simultâneos para validação cruzada do Stacking (padrão seguro 2 para evitar estouro de memória RAM e OOM killer no Linux).
+- `RUN_BINARY` (bool, default `True`): Executa o pipeline no modo de classificação binária (Benigno vs Maligno).
+- `RUN_MULTICLASS` (bool, default `False`): Executa o pipeline no modo de classificação multiclasse (classes específicas de ataque).
+- `SAMPLE_FRAC` (float, default `0.1`): Fração de amostragem estratificada do dataset (ex: `0.01` para 1%, `0.1` para 10%, `1.0` para 100%).
+
+### 2.3. Configuração Isolada no Edge (`raspberry_pi/.env`)
+
+O monitoramento e inferência no Raspberry Pi (`raspberry_pi/rpi_detector.py` e `raspberry_pi/rpi_monitor.py`) utilizam um arquivo `.env` independente em `raspberry_pi/.env` (carregado com prioridade via `raspberry_pi/config.py`):
+
+- **Captura e Inferência:**
+  - `NETWORK_INTERFACE` (str, default `'eth0'`): Interface de rede a monitorar (ex: `eth0`, `wlan0`, `end0`).
+  - `DETECTION_MODE` (str, default `'binary'`): Modo de operação do detector: `'binary'` (padrão de menor latência), `'multiclass'` ou `'cascade'` (cascata binária + DT multiclasse).
+  - `ALERT_THRESHOLD` (float, default `0.50`): Limiar de corte de probabilidade para classificação de fluxo maligno.
+  - `USE_DT_MULTICLASS_FOR_ATTACKS` (bool, default `True`): Quando detectado como malicioso no modo binário/cascata, aciona a Decision Tree multiclasse para rotular a família exata do ataque.
+  - `DT_MULTICLASS_MODEL_PATH` (str, default `'models/dt_pipeline_multiclass.joblib'`): Caminho para o modelo/pipeline Decision Tree multiclasse.
+  - `FLOW_INACTIVITY_TIMEOUT` (float, default `10.0`): Timeout em segundos para encerramento de fluxo inativo e envio para inferência.
+  - `FLOW_ACTIVE_TIMEOUT` (float, default `60.0`): Duração máxima de um fluxo contínuo antes de forçar classificação intermediária.
+  - `PORT_SCAN_THRESHOLD` (int, default `15`): Limiar de portas de destino distintas sondadas na janela de scan (5.0s) para acionar detecção heurística de Reconnaissance.
+  - `CONN_FLOOD_THRESHOLD` (int, default `20`): Limiar de tentativas de conexão SYN na janela de flood (2.0s) para acionar detecção heurística de DoS.
+  - `IGNORE_BROADCAST_MULTICAST` (bool, default `True`): Descarte automático de pacotes broadcast/multicast legítimos para evitar falsos positivos.
+  - `IGNORE_LOCAL_DISCOVERY_PORTS` (str, default `'1900,5353,5355,137,138,27036,67,68'`): Portas de protocolos de descoberta local benignos ignoradas (SSDP, mDNS, LLMNR, NetBIOS, Steam, DHCP).
+  - `DRY_RUN` (bool, default `False`): Executa o detector sem disparo real de alertas SMTP.
+  - `LOG_FILE` (str, default `'logs/aids_rpi.log'`): Arquivo de log geral do processo Edge.
+
+- **Alertas SMTP e Anti-Flood:**
+  - `ALERT_EMAIL_ENABLED` (bool, default `True`): Habilita o despacho assíncrono de e-mails de alerta.
+  - `SMTP_HOST` (str, default `'smtp.gmail.com'`), `SMTP_PORT` (int, default `587`).
+  - `SMTP_USE_TLS` (bool, default `True`), `SMTP_USE_SSL` (bool, default `False`).
+  - `SMTP_USER`, `SMTP_PASS`: Credenciais SMTP seguras (App Password de 16 dígitos para Google).
+  - `ALERT_SENDER`, `ALERT_RECIPIENT`: Endereços de origem e destino dos alertas de segurança.
+  - `COOLDOWN_SECONDS` (float, default `60.0`): Janela de supressão anti-flood para rajadas da mesma ameaça.
+
+- **Auditoria e Logs Persistentes (`DetectionLogger`):**
+  - `DETECTION_LOG_ENABLED` (bool, default `True`): Gravação em disco das detecções e fluxos.
+  - `DETECTION_LOG_FILE` (str, default `'logs/detections.jsonl'`).
+  - `DETECTION_LOG_FORMAT` (str, default `'jsonl'`): Formatos suportados: `'jsonl'`, `'csv'`, `'text'` ou `'all'`.
+  - `DETECTION_LOG_MAX_BYTES` (int, default `5242880` / 5 MB): Limite por arquivo antes da rotação automática.
+  - `DETECTION_LOG_BACKUP_COUNT` (int, default `3`): Número de cópias rotacionadas preservadas (.1, .2, .3).
+  - `DETECTION_LOG_ALL_FLOWS` (bool, default `False`): Registrar apenas intrusões (False) ou todos os fluxos avaliados (True).
 
 ---
 
@@ -118,19 +156,20 @@ flowchart TD
    - Remoção de colunas com variância zero / constantes: `Bwd PSH Flags`, `Fwd URG Flags`, `Bwd URG Flags`, `URG Flag Count`, `CWR Flag Count`, `ECE Flag Count`, `Fwd Bytes/Bulk Avg`, `Fwd Packet/Bulk Avg`, `Fwd Bulk Rate Avg`.
    - Conversão e casting de atributos numéricos para `np.float32` e categóricos (`Protocol`) para `str`.
 
-3. **Escalonamento e Pré-processamento (`ColumnTransformer`):**
-   - **Pipeline Numérico:** `SimpleImputer(strategy='median')` $\rightarrow$ `VarianceThreshold(threshold=0.0)` $\rightarrow$ `RobustScaler()` (ou `StandardScaler()`).
+3. **Escalonamento e Pré-processamento (`ColumnTransformer` em `src/preprocessing.py`):**
+   - **Pipeline Numérico (`scale_type='log_standard'` - Padrão de Produção):** `SimpleImputer(strategy='median')` $\rightarrow$ `VarianceThreshold(threshold=0.0)` $\rightarrow$ `FunctionTransformer(_log1p_clip)` (transformação logarítmica $\ln(1+\max(x, 0))$ para estabilizar atributos com variância extrema como durações, taxas e contagens) $\rightarrow$ `StandardScaler()`. *Modos alternativos suportados via código:* `robust` (`RobustScaler()`) e `standard` (`StandardScaler()`).
    - **Pipeline Categórico (`Protocol`):** `SimpleImputer(strategy='constant', fill_value='missing')` $\rightarrow$ `OneHotEncoder(handle_unknown='ignore', dtype=np.float32)`.
 
 4. **Tratamento de Desbalanceamento:**
    - Uso de `class_weight='balanced'` nos estimadores base (`LinearSVC`, `RandomForest`, `ExtraTrees`, `DecisionTree`).
 
 5. **Validação Cruzada & Out-of-Fold Predictions:**
-   - Utilização de `StratifiedKFold(n_splits=3, shuffle=True, random_state=42)` no `StackingClassifier` para geração de meta-features sem vazamento de dados (*data leakage*), com paralelização em múltiplos núcleos (`n_jobs=-1`).
+   - Utilização de `StratifiedKFold(n_splits=5, shuffle=True, random_state=42)` (configurável via `STACKING_CV_SPLITS`) no `StackingClassifier` para geração de meta-features sem vazamento de dados (*data leakage*), com paralelização multiprocesso controlada via `STACKING_N_JOBS` (padrão seguro `2` para proteção de memória RAM).
 
 6. **Persistência Estruturada de Modelos Treinados (`joblib` na pasta `./models/`):**
    - Salvamento dos artefatos serializados com sufixo do modo de alvo (`_binary` ou `_multiclass`):
      - `models/stacking_pipeline_{mode}.joblib`: Pipeline final unificado (Pré-processador `ColumnTransformer` + `StackingClassifier`).
+     - `models/dt_pipeline_{mode}.joblib`: Pipeline completo Decision Tree (`ColumnTransformer` + `DecisionTreeClassifier`), versionado para inferência de segundo estágio no Edge.
      - `models/scaler_{mode}.joblib`: Objeto `ColumnTransformer` ajustado.
      - `models/meta_learner_{mode}.joblib`: Meta-modelo de Regressão Logística extraído do Stacking.
      - `models/LinearSVC_{mode}.joblib`: Modelo LinearSVC treinado.
@@ -215,53 +254,89 @@ Para execução autônoma diretamente em dispositivos Edge / SBCs (*Raspberry Pi
 1. **Agregador e Extrator de Features em Tempo Real (`raspberry_pi/flow_aggregator.py`):**
    - Captura pacotes brutos IPv4 TCP/UDP via `scapy`.
    - Agrupa fluxos bidirecionais baseados na 5-tupla (*IP Origem, IP Destino, Porta Origem, Porta Destino, Protocolo*).
-   - Extrai as 70 features padronizadas do CICFlowMeter de forma contínua com encerramento por flags FIN/RST ou timeouts de inatividade (`FLOW_INACTIVITY_TIMEOUT`) e atividade máxima (`FLOW_ACTIVE_TIMEOUT`).
+   - Extrai as 70 features estatísticas padronizadas do CICFlowMeter de forma contínua com encerramento por flags FIN/RST ou timeouts de inatividade (`FLOW_INACTIVITY_TIMEOUT`) e atividade máxima (`FLOW_ACTIVE_TIMEOUT`).
+   - **Filtro de Tráfego Legítimo e Redução de Ruído:** Rejeição de pacotes broadcast (`255.255.255.255`, sub-redes `x.x.x.255`) e multicast (`224.0.0.0/4`, incluindo SSDP `239.255.255.250`, mDNS `224.0.0.251`), além de supressão configurável de portas de descoberta local benignas (`IGNORE_LOCAL_DISCOVERY_PORTS`: 1900, 5353, 5355, 137, 138, 27036, 67, 68), erradicando falsos positivos em redes locais domésticas/corporativas.
+   - **Detecção Heurística / Híbrida em Tempo Real:**
+     - *Port Scan (Reconnaissance):* Rastreamento de pacotes SYN de iniciação de clientes por par de hosts `(src_ip, dst_ip)` em janela deslizante de 5.0 segundos. Se o total de portas distintas sondadas atingir `PORT_SCAN_THRESHOLD` (padrão 15), o fluxo é classificado como `Reconnaissance` com 99% de confiança.
+     - *Connection Flood (DoS):* Rastreamento de rajadas de tentativas de conexão TCP na mesma porta em janela de 2.0 segundos. Se o número de conexões atingir `CONN_FLOOD_THRESHOLD` (padrão 20), o fluxo é classificado como `DoS` com 99% de confiança.
    - Algoritmo de descarte LRU por capacidade para limitar o uso de memória RAM abaixo de 400 MB.
 
-2. **Gerenciador de Alertas por E-mail com Anti-Flood (`raspberry_pi/email_alert.py`):**
+2. **Motor de Detecção em Cascata de Dois Estágios (`raspberry_pi/rpi_detector.py`):**
+   - **Estágio 1 (Classificação Primária):** Avaliação com o pipeline Stacking Ensemble (`models/stacking_pipeline_binary.joblib`) no modo binário ou cascata (`DETECTION_MODE=binary` ou `cascade`) para distinguir tráfego Benigno vs Maligno com máxima velocidade.
+   - **Estágio 2 (Especialização via Decision Tree Multiclasse):** Se o fluxo for classificado como malicioso (`is_attack=True`), o sistema consulta o pipeline de Decision Tree multiclasse (`models/dt_pipeline_multiclass.joblib`) para atribuir a classe específica de ataque (`DoS`, `Reconnaissance`, `Exploits`, `Fuzzers`, `Generic`, `Backdoor`, `Worms`, `Analysis`, `Shellcode`).
+   - **Mecanismo de Resiliência e Fallback:** Se a predição majoritária (argmax) da DT for `Benign` (apesar do Estágio 1 ter detectado intrusão), o detector seleciona automaticamente a classe de ataque com maior probabilidade relativa entre as classes malignas da DT. Caso o modelo DT não esteja disponível, adota o rótulo descritivo `Maligno (Ataque Detectado)`.
+   - **Avaliação Imediata de Fluxos Críticos:** Fluxos encerrados por FIN/RST ou que acionem as regras heurísticas de Port Scan / Connection Flood são avaliados imediatamente sem aguardar o timeout de inatividade, com controle de estado (`is_evaluated=True`) para impedir reavaliações redundantes durante flushes periódicos.
+
+3. **Sistema de Log de Detecções e Auditoria Forense (`raspberry_pi/detection_logger.py`):**
+   - Gravação persistente e thread-safe de intrusões e pacotes detectados.
+   - Suporte a múltiplos formatos: **JSON Lines (`jsonl`)**, **CSV (`csv`)** e **Texto (`text`)**, com opção simultânea (`all`).
+   - Mecanismo de **rotação automática de arquivos por tamanho (`RotatingFileHandler`)** com limite em bytes (`DETECTION_LOG_MAX_BYTES`) e retenção de backups (`DETECTION_LOG_BACKUP_COUNT`) para preservar o cartão SD do Raspberry Pi.
+   - **Esquema Enriquecido no Formato JSONL:** Registra `timestamp`, `epoch`, `event`, `attack_type`, `is_attack`, `confidence`, `confidence_pct`, `dt_attack_type`, `dt_confidence`, `dt_probabilities`, 5-tupla (`source` e `destination`), métricas do fluxo (`duration_sec`, `total_packets`, `total_bytes`, `packets_per_sec`, `bytes_per_sec`), flags TCP e regra de mitigação recomendada (`iptables`).
+   - Filtro configurável: apenas intrusões detectadas (padrão) ou todos os fluxos avaliados (`DETECTION_LOG_ALL_FLOWS`).
+
+4. **Gerenciador de Alertas por E-mail com Anti-Flood (`raspberry_pi/email_alert.py`):**
    - Despacho assíncrono via `threading.Thread` para não bloquear a captura de pacotes na interface de rede.
    - Envio via **SMTP Seguro (STARTTLS 587 / SSL 465)** com suporte a autenticação por senha de aplicativo (App Password).
    - Template duplo (HTML responsivo moderno + Texto Puro) contendo IPs, portas, probabilidade do ataque, estatísticas de tráfego e comandos de firewall recomendados (`iptables`).
-   - Mecanismo de **Cooldown / Throttling** configurável (padrão: 60s) para supressão e agregação de rajadas de alertas durante ataques volumosos (DDoS / Port Scan).
+   - Mecanismo de **Cooldown / Throttling** configurável (`COOLDOWN_SECONDS`, padrão: 60s) para supressão e agregação de rajadas de alertas durante ataques volumosos (DDoS / Port Scan).
 
-3. **Sistema de Log de Detecções e Auditoria (`raspberry_pi/detection_logger.py`):**
-   - Gravação persistente e thread-safe de intrusões e pacotes detectados.
-   - Suporte a múltiplos formatos: **JSON Lines (`jsonl`)**, **CSV (`csv`)** e **Texto (`text`)**, com opção simultânea (`all`).
-   - Mecanismo de **rotação automática de arquivos por tamanho (`RotatingFileHandler`)** com limite em bytes e retenção de backups para preservar o cartão SD do Raspberry Pi.
-   - Registro detalhado incluindo 5-tupla, estatísticas de pacotes (mínimo, máximo, média, flags TCP), métricas do fluxo, taxas de transmissão, confiança do modelo e regra de mitigação `iptables`.
-   - Filtro configurável: apenas intrusões detectadas (padrão) ou todos os fluxos avaliados (`DETECTION_LOG_ALL_FLOWS`).
+5. **Motor Edge e CLI (`raspberry_pi/rpi_detector.py` / `raspberry_pi/rpi_monitor.py` / `rpi_monitor.py`):**
+   - Suporte a captura ao vivo (`--interface eth0`), modos (`--mode binary|multiclass|cascade`), modo simulação (`--dry-run`), replay de arquivos PCAP (`--pcap arquivo.pcap`), teste SMTP (`--test-email`) e customização de logs (`--detection-log`, `--detection-log-format`, `--log-all-flows`).
 
-4. **Motor Edge e CLI (`raspberry_pi/rpi_detector.py` / `raspberry_pi/rpi_monitor.py` / `rpi_monitor.py`):**
-   - Suporte a captura ao vivo (`--interface eth0`), modo simulação (`--dry-run`), replay de arquivos PCAP (`--pcap arquivo.pcap`), teste SMTP (`--test-email`) e customização de logs (`--detection-log`, `--detection-log-format`, `--log-all-flows`).
+6. **Simulador de Tráfego Sintético de Laboratório (`simulate_traffic.py`):**
+   - Ferramenta interativa de validação e testes em ambiente controlado, simulando 6 padrões de ataque inofensivos:
+     1. *Fuzzers:* Pacotes HTTP com URIs fuzzeadas e cabeçalhos aleatórios em rajadas rápidas.
+     2. *Força Bruta / Autenticação Repetida:* Tentativas de login padronizadas em portas de serviço (Analysis / Generic).
+     3. *Backdoor / C2 Beaconing:* Batimentos periódicos de comunicação com intervalo estritamente uniforme (Flow IAT Std tendendo a zero).
+     4. *Worm Propagation:* Varredura horizontal da sub-rede local LAN em portas SMB (445) ou HTTP (80).
+     5. *DoS Flood:* Inundação de conexões TCP rápidas para validação do limiar heurístico `is_conn_flood`.
+     6. *Reconnaissance:* Varredura vertical em múltiplas portas sequenciais para validação da regra `is_port_scan`.
 
-5. **Serviço de Inicialização Automática no Boot (`raspberry_pi/aids-rpi.service`):**
-   - Arquivo unit `systemd` para inicialização automática no boot do Raspberry Pi.
-   - Execução com privilégios mínimos via Linux Capabilities (`CAP_NET_RAW`, `CAP_NET_ADMIN`).
-
-6. **Configuração Isolada no Edge (`raspberry_pi/.env` / `raspberry_pi/config.py`):**
-   - Separação completa de configurações: o arquivo `.env` na raiz controla exclusivamente o treinamento de Machine Learning (`main.py`), enquanto `raspberry_pi/.env` controla a captura, inferência, alertas SMTP e rotação de logs no Raspberry Pi 3.
-
+7. **Serviço de Inicialização Automática e Deploy em Produção (`setup_rpi.sh` & `aids-rpi.service`):**
+   - Script automatizado de provisionamento que prepara o Raspberry Pi do zero:
+     - Instalação de pacotes Linux de rede (`libpcap-dev`, `tcpdump`, `iptables-persistent`, `netfilter-persistent`, etc.).
+     - Migração e estruturação do projeto em `/etc/aids`.
+     - Criação isolada do ambiente virtual em `/etc/aids/.venv` e instalação via `python3 -m pip`.
+     - Atribuição de permissões de baixo nível via Linux Capabilities (`CAP_NET_RAW`, `CAP_NET_ADMIN`) ao Python.
+     - Habilitação de roteamento IPv4 e NAT Masquerade (`iptables`).
+     - Instalação e habilitação do serviço `systemd` (`aids-rpi.service`) para inicialização autônoma no boot do sistema operacional com reinício automático (`Restart=always`).
 
 ```mermaid
 flowchart TD
     subgraph Raspberry Pi - Edge Runtime
         Pcap[Interface de Rede eth0 / wlan0] --> Sniff[Scapy Packet Sniffer]
-        Sniff --> Agg[FlowAggregator - 5-Tuple & 70 Features]
-        Agg --> Pre[ColumnTransformer: Log1p + StandardScaler]
-        Pre --> Stack[Stacking Pipeline Classifier]
+        Sniff --> FilterCheck{Broadcast / Multicast / Portas Locais?}
+        FilterCheck -->|Sim / Legítimo| DiscardAmbient[Descarte Imediato sem Custo de CPU]
+        FilterCheck -->|Não| Agg[FlowAggregator - 5-Tuple & 70 Features]
+
+        Agg --> HeuristicCheck{Port Scan ou DoS Flood Detectado?}
+        HeuristicCheck -->|Sim: Scan| SetScan[Marca Reconnaissance - Confiança 99%]
+        HeuristicCheck -->|Sim: Flood| SetFlood[Marca DoS - Confiança 99%]
+        HeuristicCheck -->|Não| Pre[ColumnTransformer: Log1p + StandardScaler]
+
+        Pre --> Stack[Stacking Ensemble Classifier - Estágio 1]
         Stack --> Decision{Probabilidade Maligna >= 0.50?}
-        
-        Decision -->|Sim| AlertFork[Disparo de Resposta a Incidentes]
-        Decision -->|Não / Benigno| DiscardCheck{Log All Flows Ativo?}
-        DiscardCheck -->|Sim| DetLog
+
+        SetScan --> AlertFork
+        SetFlood --> AlertFork
+
+        Decision -->|Sim: Maligno| CascadeCheck{USE_DT_MULTICLASS Ativo?}
+        Decision -->|Não: Benigno| DiscardCheck{Log All Flows Ativo?}
+
+        CascadeCheck -->|Sim| DT[DT Multiclasse - Estágio 2: Tipo Exato de Ataque]
+        CascadeCheck -->|Não| GenericLabel[Rotula como Maligno Genérico]
+        DT --> AlertFork[Disparo de Resposta a Incidentes]
+        GenericLabel --> AlertFork
+
+        DiscardCheck -->|Sim| DetLog[DetectionLogger - JSONL / CSV / TEXT]
         DiscardCheck -->|Não| Discard[Descarte Normal]
 
-        AlertFork --> DetLog[DetectionLogger - JSONL / CSV / TEXT]
+        AlertFork --> DetLog
         DetLog --> Rot[Rotação Automática de Arquivos em Disco]
         
         AlertFork --> AlertMgr[EmailAlertManager]
         AlertMgr --> Throttling{Cooldown Ativo?}
-        Throttling -->|Sim| Suppress[Agregação de Contador]
+        Throttling -->|Sim| Suppress[Agregação e Supressão de Alerta]
         Throttling -->|Não| SMTP[SMTP TLS/SSL - Disparo Assíncrono]
         SMTP --> Mail[E-mail de Alerta com Detalhes e Regra iptables]
     end
@@ -294,5 +369,37 @@ Para garantir que a engine de detecção (`RPIDetector`) analise **todo o tráfe
 4. **Ajuste do Servidor DHCP no Roteador Principal:**
    - Alteração do campo **Default Gateway** (Gateway Padrão) nas configurações DHCP do roteador doméstico para o IP do Raspberry Pi (`192.168.1.2`).
    - Com essa alteração, todo o tráfego gerado pelos dispositivos da casa é direcionado ao Raspberry Pi antes de sair para a internet, permitindo inspeção em tempo real e extração de fluxos pelo `Scapy` e `FlowAggregator`.
+
+---
+
+## 8. Suíte de Testes Automatizados (Unittest)
+
+A estabilidade e integridade funcional do projeto são garantidas por uma suíte com **40 testes unitários automatizados** localizados no diretório `tests/`:
+
+- `tests/test_rpi_detector.py` (22 testes):
+  - Agregação de fluxos TCP e UDP bidirecionais com verificação de 5-tupla e flags TCP.
+  - Conformidade das 70 features extraídas com o padrão oficial do CICFlowMeter.
+  - Expiração de fluxos por inatividade (`FLOW_INACTIVITY_TIMEOUT`) e descarte por capacidade de memória LRU.
+  - Inferência no detector primário (Stacking) e detecção em cascata com DT Multiclasse (Estágio 2).
+  - Mecanismo de fallback quando o argmax da DT for `Benign`.
+  - Classificação heurística imediata para Port Scan (`Reconnaissance`) e Connection Flood (`DoS`).
+  - Prevenção de reavaliação duplicada de fluxos após pacotes RST/FIN.
+  - Filtragem e descarte de tráfego multicast (SSDP, mDNS) e broadcast (subnet e limited broadcast).
+  - Permissão e extração correta de fluxos unicast legítimos.
+- `tests/test_detection_logger.py` (10 testes):
+  - Gravação estruturada em formato JSON Lines (`jsonl`), CSV e Texto.
+  - Rotação automática de arquivos por estouro do limite de bytes (`DETECTION_LOG_MAX_BYTES`).
+  - Gravação segura e concorrente em múltiplos threads.
+  - Integração do `RPIDetector` com o `DetectionLogger` em tempo de execução.
+- `tests/test_models.py` (6 testes):
+  - Inicialização e validação de todos os estimadores de base (`linearsvc`, `rf`, `et`, `dt`, `mlp`, `hgb`, `linearsvcCalibrated`).
+  - Arquitetura da Mini Rede Neural MLP (`hidden_layer_sizes=(64, 32)`).
+  - Meta-classificador de Regressão Logística com `class_weight='balanced'`.
+  - Perfis do Stacking Ensemble (`edge`, `balanced`, `legacy`).
+  - Extração de coeficientes e interpretabilidade do Meta-Learner.
+- `tests/test_preprocessing.py` (2 testes):
+  - Descarte de colunas identificadoras e constantes de variância zero.
+  - Construção e transformação pelo `ColumnTransformer` com `log_standard` e `robust`.
+
 
 

@@ -73,10 +73,10 @@ def get_base_learners(random_state=42):
         )),
         ('dt', DecisionTreeClassifier(
             criterion='entropy',
-            max_depth=15,
-            min_samples_split=5,
-            min_samples_leaf=2,
-            ccp_alpha=0.0001,
+            max_depth=12,
+            min_samples_split=20,
+            min_samples_leaf=8,
+            ccp_alpha=0.00015,
             class_weight='balanced',
             random_state=random_state
         )),
@@ -131,6 +131,7 @@ def get_stacking_classifier(
       * 'balanced': linearsvcCalibrated, rf, et, hgb
       * 'performance': linearsvcCalibrated, rf, et, hgb, mlp
       * 'legacy': linearsvcCalibrated, rf, et, dt
+      * 'padrao': linearsvcCalibrated, dt
     - Estimadores personalizados podem ser passados via estimator_names (lista de strings).
     - Meta-classificador (Nível 1): Regressão Logística balanceada operando sobre probabilidades [0, 1].
     - StratifiedKFold com cv_splits para geração de meta-features out-of-fold sem data leakage.
@@ -171,6 +172,11 @@ def get_stacking_classifier(
             ('et', estimators_dict['et']),
             ('dt', estimators_dict['dt'])
         ]
+    elif profile == 'padrao':
+            stacking_estimators = [
+                ('linearsvcCalibrated', estimators_dict['linearsvcCalibrated']),
+                ('dt', estimators_dict['dt'])
+            ]
     else:
         raise ValueError(f"Perfil de Stacking desconhecido: '{profile}'. Use 'edge', 'balanced', 'performance' ou 'legacy'.")
 

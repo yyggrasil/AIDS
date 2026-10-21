@@ -9,7 +9,7 @@ import joblib
 import pandas as pd
 from sklearn.preprocessing import label_binarize
 
-def evaluate_models(models_dict, X_test, y_test, results_dir='./results', suffix='binary'):
+def evaluate_models(models_dict, X_test, y_test, results_dir='./results', suffix='binary', preprocessor=None):
     """
     Avalia um dicionário de modelos (ex: {'LinearSVC': m1, 'RF': m2, 'Stacking': m3})
     e gera os gráficos comparativos requeridos na arquitetura.
@@ -77,8 +77,9 @@ def evaluate_models(models_dict, X_test, y_test, results_dir='./results', suffix
     
     # 5. Pesos do SVM (LinearSVC)
     if 'LinearSVC' in models_dict:
-        scaler_path = os.path.join('models', f'scaler_{suffix}.joblib')
-        preprocessor = joblib.load(scaler_path) if os.path.exists(scaler_path) else None
+        if preprocessor is None:
+            scaler_path = os.path.join('models', f'scaler_{suffix}.joblib')
+            preprocessor = joblib.load(scaler_path) if os.path.exists(scaler_path) else None
         plot_svm_weights(models_dict['LinearSVC'], preprocessor, os.path.join(results_dir, f'svm_feature_weights_{suffix}.png'), is_multiclass=is_multiclass)
 
     print(f"Todos os gráficos salvos em {results_dir}")
@@ -292,19 +293,49 @@ def plot_latency_vs_f1(metrics_data, latencies, save_path):
     plt.savefig(save_path)
     plt.close()
 
-def plot_svm_weights(model, preprocessor, save_path, is_multiclass=False, top_n=25):
+def _extract_feature_names(preprocessor, n_features):
     """
-    Plota a importância/pesos (coeficientes) do LinearSVC.
+    Extrai os nomes reais dos atributos do pré-processador ColumnTransformer,
+    assegurando suporte a etapas como FunctionTransformer (log1p).
     """
     if preprocessor is not None:
         try:
-            feature_names = preprocessor.get_feature_names_out()
+            # Assegura que FunctionTransformers (como log1p) tenham feature_names_out configurado
+            if hasattr(preprocessor, 'named_transformers_'):
+                for _, trans in preprocessor.named_transformers_.items():
+                    if hasattr(trans, 'named_steps'):
+                        for _, step in trans.named_steps.items():
+                            if hasattr(step, 'feature_names_out') and step.feature_names_out is None:
+                                step.feature_names_out = 'one-to-one'
+            names = list(preprocessor.get_feature_names_out())
+            if len(names) == n_features:
+                return [str(f).replace('num__', '').replace('cat__', '') for f in names]
         except Exception:
-            feature_names = [f"feature_{i}" for i in range(model.coef_.shape[1])]
-    else:
-        feature_names = [f"feature_{i}" for i in range(model.coef_.shape[1])]
-        
-    clean_names = [f.replace('num__', '').replace('cat__', '') for f in feature_names]
+            pass
+
+        # Fallback secundário: inspeciona transformers_ do ColumnTransformer
+        try:
+            feature_names = []
+            if hasattr(preprocessor, 'transformers_'):
+                for name, transformer, cols in preprocessor.transformers_:
+                    if name == 'remainder' and transformer == 'drop':
+                        continue
+                    if hasattr(transformer, 'get_feature_names_out'):
+                        feature_names.extend(list(transformer.get_feature_names_out(cols)))
+                    elif isinstance(cols, (list, tuple, np.ndarray, pd.Index)):
+                        feature_names.extend([str(c) for c in cols])
+            if len(feature_names) == n_features:
+                return [str(f).replace('num__', '').replace('cat__', '') for f in feature_names]
+        except Exception:
+            pass
+
+    return [f"feature_{i}" for i in range(n_features)]
+
+def plot_svm_weights(model, preprocessor, save_path, is_multiclass=False, top_n=25):
+    """
+    Plota a importância/pesos (coeficientes) do LinearSVC com nomes reais das features.
+    """
+    clean_names = _extract_feature_names(preprocessor, model.coef_.shape[1])
     
     if not is_multiclass:
         coefs = model.coef_[0]

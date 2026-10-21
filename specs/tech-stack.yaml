@@ -1,6 +1,6 @@
 project:
   name: "AIDS-Alternative-Traffic-Detection"
-  description: "Sistema de Detecção de Intrusão Baseado em Anomalias e Assinaturas (AIDS) utilizando Stacking Ensemble (LinearSVC Calibrado + Random Forest + Extra Trees + Decision Tree) com Meta-Classificador de Regressão Logística em modos Binário e Multiclasse"
+  description: "Sistema de Detecção de Intrusão Baseado em Anomalias e Assinaturas (AIDS) utilizando Stacking Ensemble (LinearSVC Calibrado + Random Forest + Extra Trees + HistGradientBoosting + Decision Tree) com Meta-Classificador de Regressão Logística em modos Binário, Multiclasse e Cascata com Decision Tree de segundo estágio no Edge (Raspberry Pi)"
   version: "1.0.0"
   domain: "Cybersecurity / Intrusion Detection System (AIDS)"
 
@@ -27,7 +27,7 @@ environment:
       - name: "TRAIN_DT"
         type: "bool"
         default: "True"
-        description: "Habilita ou desabilita o treinamento do modelo Decision Tree isolado."
+        description: "Habilita ou desabilita o treinamento do modelo Decision Tree isolado (gera também models/dt_pipeline_{mode}.joblib)."
       - name: "TRAIN_RF"
         type: "bool"
         default: "True"
@@ -48,6 +48,22 @@ environment:
         type: "bool"
         default: "True"
         description: "Habilita ou desabilita o treinamento do Stacking Ensemble."
+      - name: "STACKING_PROFILE"
+        type: "str"
+        default: "edge"
+        description: "Perfil de estimadores do Stacking ('edge', 'balanced', 'performance', 'legacy')."
+      - name: "STACKING_CV_SPLITS"
+        type: "int"
+        default: "5"
+        description: "Divisões estratificadas para validação cruzada out-of-fold no Stacking."
+      - name: "STACKING_PASSTHROUGH"
+        type: "bool"
+        default: "False"
+        description: "Concatena features de entrada pré-processadas às meta-features de probabilidade."
+      - name: "STACKING_N_JOBS"
+        type: "int"
+        default: "2"
+        description: "Número de workers concorrentes para a validação cruzada do Stacking (padrão 2 para evitar exaustão de memória/OOM no Linux)."
       - name: "RUN_BINARY"
         type: "bool"
         default: "True"
@@ -60,10 +76,119 @@ environment:
         type: "float"
         default: "0.1"
         description: "Fração de amostragem estratificada do dataset (ex: 0.01 = 1%, 0.1 = 10%, 1.0 = 100%)."
-      - name: "STACKING_N_JOBS"
-        type: "int"
-        default: "2"
-        description: "Número de workers concorrentes para a validação cruzada do Stacking (padrão 2 para evitar exaustão de memória/OOM no Linux)."
+
+    edge_configuration:
+      tool: "python-dotenv"
+      file: "raspberry_pi/.env"
+      description: "Arquivo de configuração isolado com prioridade para captura de rede, inferência em borda, alertas SMTP e rotação de logs no Raspberry Pi."
+      environment_variables:
+        - name: "NETWORK_INTERFACE"
+          type: "str"
+          default: "eth0"
+          description: "Interface de rede física/virtual para captura promíscua de pacotes."
+        - name: "DETECTION_MODE"
+          type: "str"
+          default: "binary"
+          description: "Modo de inferência do detector: 'binary', 'multiclass' ou 'cascade'."
+        - name: "ALERT_THRESHOLD"
+          type: "float"
+          default: "0.50"
+          description: "Limiar de probabilidade para disparar alarme de intrusão maliciosa."
+        - name: "USE_DT_MULTICLASS_FOR_ATTACKS"
+          type: "bool"
+          default: "True"
+          description: "Aciona o classificador DT multiclasse (Estágio 2) para identificar a classe exata de ataque."
+        - name: "DT_MULTICLASS_MODEL_PATH"
+          type: "str"
+          default: "models/dt_pipeline_multiclass.joblib"
+          description: "Caminho do modelo/pipeline Decision Tree multiclasse serializado."
+        - name: "FLOW_INACTIVITY_TIMEOUT"
+          type: "float"
+          default: "10.0"
+          description: "Segundos de inatividade antes de finalizar e classificar um fluxo de rede."
+        - name: "FLOW_ACTIVE_TIMEOUT"
+          type: "float"
+          default: "60.0"
+          description: "Duração contínua máxima de um fluxo ativo antes de forçar predição."
+        - name: "PORT_SCAN_THRESHOLD"
+          type: "int"
+          default: "15"
+          description: "Portas distintas sondadas em 5s para acionar detecção heurística de Reconnaissance."
+        - name: "CONN_FLOOD_THRESHOLD"
+          type: "int"
+          default: "20"
+          description: "Conexões TCP em 2s para acionar detecção heurística de DoS."
+        - name: "IGNORE_BROADCAST_MULTICAST"
+          type: "bool"
+          default: "True"
+          description: "Filtra tráfego de broadcast/multicast legítimo para evitar falsos positivos."
+        - name: "IGNORE_LOCAL_DISCOVERY_PORTS"
+          type: "str"
+          default: "1900,5353,5355,137,138,27036,67,68"
+          description: "Portas de serviços benignos de rede ignoradas (SSDP, mDNS, LLMNR, NetBIOS, Steam, DHCP)."
+        - name: "DRY_RUN"
+          type: "bool"
+          default: "False"
+          description: "Executa a engine em modo de teste e simulação sem disparo real de alertas SMTP."
+        - name: "LOG_FILE"
+          type: "str"
+          default: "logs/aids_rpi.log"
+          description: "Arquivo de log operacional de execução do serviço AIDS-RPi."
+        - name: "ALERT_EMAIL_ENABLED"
+          type: "bool"
+          default: "True"
+          description: "Habilita envio de e-mails de alerta de segurança via SMTP seguro."
+        - name: "SMTP_HOST"
+          type: "str"
+          default: "smtp.gmail.com"
+        - name: "SMTP_PORT"
+          type: "int"
+          default: "587"
+        - name: "SMTP_USE_TLS"
+          type: "bool"
+          default: "True"
+        - name: "SMTP_USE_SSL"
+          type: "bool"
+          default: "False"
+        - name: "SMTP_USER"
+          type: "str"
+          default: "seu_email@gmail.com"
+        - name: "SMTP_PASS"
+          type: "str"
+          default: "sua_senha_de_app_aqui"
+        - name: "ALERT_SENDER"
+          type: "str"
+          default: "aids-rpi@antigravity.local"
+        - name: "ALERT_RECIPIENT"
+          type: "str"
+          default: "admin_seguranca@empresa.com,soc@empresa.com"
+        - name: "COOLDOWN_SECONDS"
+          type: "float"
+          default: "60.0"
+          description: "Janela anti-flood para agregação e supressão de alertas repetidos da mesma ameaça."
+        - name: "DETECTION_LOG_ENABLED"
+          type: "bool"
+          default: "True"
+          description: "Habilita gravação persistente das detecções e auditoria em disco."
+        - name: "DETECTION_LOG_FILE"
+          type: "str"
+          default: "logs/detections.jsonl"
+        - name: "DETECTION_LOG_FORMAT"
+          type: "str"
+          default: "jsonl"
+          description: "Formato do log: 'jsonl', 'csv', 'text' ou 'all'."
+        - name: "DETECTION_LOG_MAX_BYTES"
+          type: "int"
+          default: "5242880"
+          description: "Tamanho máximo por arquivo antes da rotação automática (5 MB)."
+        - name: "DETECTION_LOG_BACKUP_COUNT"
+          type: "int"
+          default: "3"
+          description: "Número de cópias rotacionadas mantidas (.1, .2, .3)."
+        - name: "DETECTION_LOG_ALL_FLOWS"
+          type: "bool"
+          default: "False"
+          description: "Grava todos os fluxos de rede (True) ou apenas intrusões detectadas (False)."
 
 core_libraries:
   data_manipulation:
@@ -86,6 +211,8 @@ machine_learning:
       description: "Classificação em duas classes: Benigno (0) vs Maligno (1)."
     - name: "multiclass"
       description: "Classificação nos tipos específicos de ataques presentes no dataset."
+    - name: "cascade"
+      description: "Classificação em dois estágios: Estágio 1 Stacking Binário (Benigno vs Maligno) seguido por Estágio 2 Decision Tree Multiclasse para especialização do tipo de ataque."
   components:
     base_learners:
       - name: "Linear Support Vector Classifier (LinearSVC)"
@@ -215,15 +342,43 @@ machine_learning:
       n_jobs: 2  # Configurável via STACKING_N_JOBS (default: 2 para proteção de memória)
       purpose: "Combinação hierárquica em camadas dos estimadores base com calibração isotônica e geração out-of-fold de meta-atributos sem vazamento de dados."
 
+    two_stage_cascade:
+      description: "Arquitetura hierárquica de dois estágios para inferência ultrarrápida e especializada no Edge."
+      stage_1:
+        model: "StackingClassifier (Binary Mode)"
+        artifact: "./models/stacking_pipeline_binary.joblib"
+        purpose: "Detecção ultrarrápida de anomalia binária (Benigno vs Maligno com limiar de 0.50)."
+      stage_2:
+        model: "DecisionTreeClassifier (Multiclass Pipeline)"
+        artifact: "./models/dt_pipeline_multiclass.joblib"
+        purpose: "Identificação precisa da família do ataque (DoS, Reconnaissance, Exploits, Fuzzers, Generic, Backdoor, Worms, Analysis, Shellcode)."
+      fallback_logic: "Caso a classe majoritária na DT seja Benign após confirmação de ataque no Estágio 1, seleciona automaticamente a classe de ataque com maior probabilidade relativa entre as classes malignas."
+
+    heuristic_detection:
+      description: "Camada híbrida de detecção imediata baseada em correlação de tráfego em janelas deslizantes (Scapy / FlowAggregator)."
+      port_scan_reconnaissance:
+        window_seconds: 5.0
+        threshold_ports: 15
+        label: "Reconnaissance"
+        confidence: 0.99
+      connection_flood_dos:
+        window_seconds: 2.0
+        threshold_connections: 20
+        label: "DoS"
+        confidence: 0.99
+
 feature_engineering_and_preprocessing:
   pipeline_structure: "ColumnTransformer com Pipelines dedicados para variáveis numéricas e categóricas"
   scaling:
-    - name: "RobustScaler"
+    - name: "Log1p + StandardScaler (log_standard - padrão de produção)"
+      module: "sklearn.preprocessing.FunctionTransformer + sklearn.preprocessing.StandardScaler"
+      purpose: "Transformação logarítmica ln(1 + max(x,0)) para comprimir atributos com assimetria extrema (durações, taxas, bytes) seguida de padronização Z-score."
+    - name: "RobustScaler (modo alternativo 'robust')"
       module: "sklearn.preprocessing.RobustScaler"
-      purpose: "Escalonamento numérico robusto baseado em mediana e IQR para amortecer o impacto de outliers de tráfego (padrão)."
-    - name: "StandardScaler"
+      purpose: "Escalonamento numérico robusto baseado em mediana e IQR para amortecer o impacto de outliers de tráfego."
+    - name: "StandardScaler (modo alternativo 'standard')"
       module: "sklearn.preprocessing.StandardScaler"
-      purpose: "Padronização Z-score opcional para atributos numéricos."
+      purpose: "Padronização Z-score direta sem transformação logarítmica."
 
   imputation_and_selection:
     - name: "SimpleImputer"
@@ -273,6 +428,9 @@ model_persistence:
     - name: "stacking_pipeline"
       path: "./models/stacking_pipeline_{target_mode}.joblib"
       description: "Pipeline completo unificado contendo o ColumnTransformer e o Stacking Classifier treinado."
+    - name: "dt_pipeline"
+      path: "./models/dt_pipeline_{target_mode}.joblib"
+      description: "Pipeline completo unificado contendo o ColumnTransformer e o Decision Tree Classifier treinado (usado no Estágio 2 de inferência multiclasse no Edge)."
     - name: "scaler"
       path: "./models/scaler_{target_mode}.joblib"
       description: "Objeto ColumnTransformer pré-processador ajustado (scaler, imputer, one-hot encoder e variance threshold)."
@@ -338,6 +496,18 @@ visualization_and_metrics:
 edge_deployment:
   target_platform: "Raspberry Pi (3B+, 4B, 5, Zero 2 W) / Debian Linux"
   directory: "raspberry_pi/"
+  deployment_path: "/etc/aids"
+  setup_automation:
+    script: "setup_rpi.sh"
+    purpose: "Provisionamento automatizado do dispositivo Edge do zero para produção."
+    actions:
+      - "Instalação de dependências do sistema operacional Linux (libpcap-dev, tcpdump, iptables-persistent, netfilter-persistent, libcap2-bin)"
+      - "Migração e estruturação do projeto no diretório padronizado /etc/aids"
+      - "Criação de ambiente virtual limpo em /etc/aids/.venv e atualização de pacotes via python3 -m pip"
+      - "Concessão de Linux Capabilities (CAP_NET_RAW, CAP_NET_ADMIN) ao binário Python para execução com privilégios mínimos"
+      - "Configuração de IP forwarding (sysctl net.ipv4.ip_forward=1) e NAT Masquerade no iptables"
+      - "Instalação, habilitação e inicialização do serviço systemd aids-rpi.service com reinício automático (Restart=always)"
+
   libraries:
     - name: "scapy"
       version: ">=2.5.0"
@@ -347,6 +517,30 @@ edge_deployment:
       purpose: "Monitoramento em tempo real do uso de CPU e consumo de memória RAM do Raspberry Pi."
     - name: "smtplib / email.mime"
       purpose: "Envio de alertas de intrusão autenticados e seguros via SMTP (TLS/SSL) em background assíncrono com proteção anti-flood/cooldown."
+
+  traffic_filtering:
+    broadcast_multicast:
+      description: "Descarte de pacotes enviados a endereços broadcast (255.255.255.255, x.x.x.255) e multicast (224.0.0.0/4 como SSDP 239.255.255.250 e mDNS 224.0.0.251)."
+    local_discovery_ports:
+      description: "Supressão de tráfego em portas de serviços locais legítimos (SSDP 1900, mDNS 5353, LLMNR 5355, NetBIOS 137/138, Steam 27036, DHCP 67/68)."
+
+  audit_logging:
+    tool: "DetectionLogger"
+    file: "logs/detections.jsonl"
+    formats:
+      - "jsonl"
+      - "csv"
+      - "text"
+      - "all"
+    rotation: "Rotação automática por limite de tamanho (RotatingFileHandler com padrão de 5 MB e 3 backups)"
+    enriched_fields:
+      - "dt_attack_type"
+      - "dt_confidence"
+      - "dt_probabilities"
+      - "flow_metrics (duration, packets, bytes, rates)"
+      - "tcp_flags"
+      - "mitigation_rule (comando iptables gerado automaticamente)"
+
   service_management:
     tool: "systemd"
     unit_file: "raspberry_pi/aids-rpi.service"
@@ -369,3 +563,45 @@ edge_deployment:
       - name: "DHCP Integration"
         target: "Roteador Wi-Fi / Modem Principal"
         purpose: "Redirecionamento do parâmetro Default Gateway no DHCP para o IP estático do Raspberry Pi (ex: 192.168.1.2)."
+
+testing_and_simulation:
+  synthetic_traffic_generator:
+    script: "simulate_traffic.py"
+    purpose: "Simulador interativo de tráfego de rede para validação de regras e modelos em ambiente de laboratório."
+    attack_vectors:
+      - id: 1
+        name: "Fuzzers"
+        description: "Pacotes HTTP com URIs fuzzeadas e cabeçalhos randômicos."
+      - id: 2
+        name: "Brute Force"
+        description: "Tentativas repetidas de autenticação padronizada (Analysis / Generic)."
+      - id: 3
+        name: "C2 Beaconing"
+        description: "Sinais de batimento (heartbeats) com intervalo fixo (IAT Std nulo)."
+      - id: 4
+        name: "Worm Propagation"
+        description: "Varredura horizontal da sub-rede local em porta única (ex: SMB 445)."
+      - id: 5
+        name: "DoS Flood"
+        description: "Inundação rápida de conexões TCP na mesma porta (validação de CONN_FLOOD_THRESHOLD)."
+      - id: 6
+        name: "Reconnaissance"
+        description: "Varredura vertical em múltiplas portas sequenciais (validação de PORT_SCAN_THRESHOLD)."
+
+  automated_unit_tests:
+    framework: "unittest"
+    total_tests: 40
+    status: "100% Passing"
+    modules:
+      - path: "tests/test_rpi_detector.py"
+        test_count: 22
+        scope: "Agregação Scapy, 70 features CICFlowMeter, cascata DT multiclasse, heurísticas DoS/Scan, filtros de tráfego legítimo, unicast."
+      - path: "tests/test_detection_logger.py"
+        test_count: 10
+        scope: "Formatos JSONL/CSV/Text, rotação automática por tamanho, concorrência thread-safe, integração com RPIDetector."
+      - path: "tests/test_models.py"
+        test_count: 6
+        scope: "Estimadores base, calibração LinearSVC, MLP (64, 32), meta-learner, perfis Stacking (edge, balanced, legacy)."
+      - path: "tests/test_preprocessing.py"
+        test_count: 2
+        scope: "Descarte de IDs/constantes, pipeline de escalonamento numérico e categórico."

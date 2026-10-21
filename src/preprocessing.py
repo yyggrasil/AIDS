@@ -3,8 +3,9 @@ import numpy as np
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, RobustScaler, OneHotEncoder, FunctionTransformer
 from sklearn.impute import SimpleImputer
-from sklearn.feature_selection import VarianceThreshold
+from sklearn.feature_selection import VarianceThreshold, SelectKBest, f_classif
 from sklearn.pipeline import Pipeline
+import warnings
 
 def _log1p_clip(x):
     return np.log1p(np.clip(x, 0, None))
@@ -18,7 +19,7 @@ def get_preprocessor(numeric_features, categorical_features, scale_type='log_sta
         numeric_steps = [
             ('imputer', SimpleImputer(strategy='median')),
             ('variance', VarianceThreshold(threshold=0.0)),
-            ('log1p', FunctionTransformer(_log1p_clip)),
+            ('log1p', FunctionTransformer(_log1p_clip, feature_names_out='one-to-one')),
             ('scaler', StandardScaler())
         ]
     elif scale_type == 'robust':
@@ -71,3 +72,20 @@ def drop_irrelevant_features(df):
         df = df.drop(columns=existing_cols_to_drop)
         
     return df
+
+def select_top_features(X_train, y_train, X_test=None, k=40):
+    """
+    Seleciona as K melhores features com base no teste ANOVA F-value (f_classif),
+    reduzindo dimensionalidade e correlações espúrias para mitigar overfitting.
+    """
+    n_features = X_train.shape[1]
+    k_actual = min(k, n_features) if isinstance(k, int) and k > 0 else 'all'
+    selector = SelectKBest(score_func=f_classif, k=k_actual)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        X_train_sel = selector.fit_transform(X_train, y_train)
+    if X_test is not None:
+        X_test_sel = selector.transform(X_test)
+        return X_train_sel, X_test_sel, selector
+    return X_train_sel, selector
+
